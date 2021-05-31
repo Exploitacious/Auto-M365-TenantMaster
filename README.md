@@ -1,0 +1,1 @@
+# Auto-M365-TenantMaster
