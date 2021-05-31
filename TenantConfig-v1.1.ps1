@@ -1,4 +1,4 @@
-﻿<#
+<#
 #################################################
 ## Tenant & Exchange Configs Master v1.1
 #################################################
@@ -86,7 +86,12 @@ $Answer = Read-Host "Would you like this script to configure your Microsoft 365 
 
     ## Check if Intune is MDM Authority. If not, set it.
             $mdmAuth = (Invoke-MSGraphRequest -Url "https://graph.microsoft.com/beta/organization('$OrgId')?`$select=mobiledevicemanagementauthority" -HttpMethod Get -ErrorAction Stop).mobileDeviceManagementAuthority
-            if($mdmAuth -notlike "intune")            {                Write-Progress -Activity "Setting Intune as the MDM Authority" -Status "..."                $OrgID = (Invoke-MSGraphRequest -Url "https://graph.microsoft.com/v1.0/organization" -HttpMethod Get -ErrorAction Stop).value.id                Invoke-MSGraphRequest -Url "https://graph.microsoft.com/v1.0/organization/$OrgID/setMobileDeviceManagementAuthority" -HttpMethod Post -ErrorAction Stop            }
+            if($mdmAuth -notlike "intune")
+            {
+                Write-Progress -Activity "Setting Intune as the MDM Authority" -Status "..."
+                $OrgID = (Invoke-MSGraphRequest -Url "https://graph.microsoft.com/v1.0/organization" -HttpMethod Get -ErrorAction Stop).value.id
+                Invoke-MSGraphRequest -Url "https://graph.microsoft.com/v1.0/organization/$OrgID/setMobileDeviceManagementAuthority" -HttpMethod Post -ErrorAction Stop
+            }
             Write-Host -ForegroundColor $MessageColor "Intune is set as the MDM Authority"
             Write-Host
 
@@ -144,13 +149,19 @@ $Answer = Read-Host "Would you like this script to configure your Microsoft 365 
 
 
     ## Set Time and language on all mailboxes to Eastern Standard, English USA
+            Write-Host -ForegroundColor $AssesmentColor "Configuring Date/Time and Locale settings for each mailbox"
             Get-Mailbox -ResultSize unlimited -RecipientTypeDetails UserMailbox | Foreach-Object {
                 Set-MailboxRegionalConfiguration -Identity $PsItem.alias -Language "en-US" -TimeZone "Eastern Standard Time"
             }
+            Write-Host
+            Write-Host -ForegroundColor $MessageColor "Time, Date and Locale configured for each mailbox"
+
 
 
     ## Disable Group Creation unless User is member of 'Group Creators' Group
 
+            Write-Host -ForegroundColor $AssesmentColor "Configuring 'Group Creators' Security Group and Settings"
+        
             New-AzureADGroup -DisplayName $GroupCreatorName -MailEnabled $false -SecurityEnabled $true -MailNickName "NotSet" -Description "Users allowed to create M365 groups"
 
             $AllowGroupCreation = $False
@@ -289,7 +300,7 @@ $Answer = Read-Host "Would you like this script to configure your Microsoft 365 
 
     ## Set up Archive Mailbox and Legal Hold for all available users (Must have Proper Licensing from Microsoft)
 
-            $Answer = Read-Host "Do you want to configure Archiving and Litigation Hold features? NOTE: Requires Exchange Online Plan 2 or Exchange Online Archiving add-on; Y or N "
+            $Answer = Read-Host "Do you want to configure Archiving and Litigation Hold features? NOTE: Requires Exchange Online Plan 2, M365 Business Premium or Exchange Online Archiving add-on; Y or N "
             if($Answer -eq 'y' -or $Answer -eq 'yes') {
 
             ## Check whether the auto-expanding archive feature is enabled, and if not, enable it
@@ -309,7 +320,7 @@ $Answer = Read-Host "Would you like this script to configure your Microsoft 365 
 
             ## Prompt whether or not to enable the Archive mailbox for all users
                 Write-Host 
-                $ArchiveAnswer = Read-Host "Do you want to enable the Archive mailbox for all user mailboxes? Y or N "
+                $ArchiveAnswer = Read-Host "Do you want to enable the Archive mailbox for all user mailboxes? Y or N (Will create In-Place Archive Folder in EXO)"
                 if ($ArchiveAnswer -eq 'y'-or $ArchiveAnswer -eq 'yes') {
                     Get-Mailbox -ResultSize Unlimited -Filter {ArchiveStatus -Eq "None" -AND RecipientTypeDetails -eq "UserMailbox"} | Enable-Mailbox -Archive
                     Write-Host 
@@ -325,7 +336,7 @@ $Answer = Read-Host "Would you like this script to configure your Microsoft 365 
 
             ## Prompt whether or not to enable Litigation Hold for all mailboxes
                 Write-Host 
-                $LegalHoldAnswer = Read-Host "Do you want to enable Litigation Hold for all mailboxes? Type Y or N and press Enter to continue. NOTE: Requires Exchange Online Plan 2. You can hit Y and ligitation will be attempted to be enabled, but the process might fail because ExoPlan2 is not available. This is non-destructve and you can continue/restart the script."
+                $LegalHoldAnswer = Read-Host "Do you want to enable Litigation Hold for all mailboxes? Type Y or N and press Enter to continue. You can hit Y and ligitation will be attempted to be enabled, but the process might fail because ExoPlan2 is not available. This is non-destructve and you can continue/restart the script."
                 if ($LegalHoldAnswer -eq 'y' -or $LegalHoldAnswer -eq 'yes') {
                     Get-Mailbox -ResultSize Unlimited -Filter {LitigationHoldEnabled -Eq "False" -AND RecipientTypeDetails -ne "DiscoveryMailbox"} | Set-Mailbox -LitigationHoldEnabled $True
                     Write-Host 
@@ -369,4 +380,3 @@ This makes more sense to be enabled in the ATP script.
 
     Write-Host
     Write-Host -ForegroundColor green "This concludes the script for Baseline Tenant Configs"
-
