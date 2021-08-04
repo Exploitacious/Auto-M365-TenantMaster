@@ -8,12 +8,12 @@ This script is safe to run in any stage of the tenant deployment procedure (but 
 
 The following items will be configured automatically:
 
+- Enable-OrganizationCustomization
 - Run checks to see if groups and users already exist. If not, create the following:
 - Create a Break-Glass Security Group (Exclude from Conditional Access)
 - Create a Break-Glass Account (and make member of 'Exclude from CA' group)
-- Create a Security gorup for users who are allowed to create groups. (Group Creators)
 - Create a Pilot-Device Security Group for Intune
-- Create a forwarding-allowed Mail-enabled Security Group - Kind of broken at the moment. Not a critical feature
+- Create a forwarding-allowed Mail-enabled Security Group
 
 - Set Intune as MDM Authority
 - Enable Modern Authentication (non-destructive and will leave legacy Auth on if it's still enabled)
@@ -109,6 +109,10 @@ $Answer = Read-Host "Would you like this script to configure your Microsoft 365 
         $PasswordProfile.Password = $BGAccountPass
         $GlobalAdmin = $Cred.Username
 
+
+    # Enable Organization Customization Features
+
+        Enable-OrganizationCustomization
 
     ## New Security Groups and BG User for easier management purposes
 
