@@ -65,6 +65,9 @@ Install all modules on your powershell. Be sure to use AzureAD Preview for Conne
         $BreakGlassAcccount = $MSPName + "BG"
         $BGAccountPass = "Powershellisbeast8442!"
 
+        ## Allow Admin to Access all Mailboxes in Tenant
+        $addAdminToMailboxes = $false
+
     # Other
         $MessageColor = "Green"
         $AssessmentColor = "Yellow"
@@ -302,10 +305,14 @@ $Answer = Read-Host "Would you like this script to configure your Microsoft 365 
 
 
     ## Allow Admin to Access all Mailboxes in Tenant
-            Get-Mailbox -ResultSize unlimited -Filter {(RecipientTypeDetails -eq 'UserMailbox') -and (Alias -ne 'Admin')} | Add-MailboxPermission -User $GlobalAdmin -AutoMapping:$false -AccessRights fullaccess -InheritanceType all
-            Write-Host
-            Write-Host -ForegroundColor $MessageColor "Access to all mailboxes has been granted to the Global Admin account supplied"
-            Write-Host
+            if($addAdminToMailboxes -eq $true) {
+                Get-Mailbox -ResultSize unlimited -Filter {(RecipientTypeDetails -eq 'UserMailbox') -and (Alias -ne 'Admin')} | Add-MailboxPermission -User $GlobalAdmin -AutoMapping:$false -AccessRights fullaccess -InheritanceType all
+                Write-Host
+                Write-Host -ForegroundColor $MessageColor "Access to all mailboxes has been granted to the Global Admin account supplied"
+                Write-Host
+            } else {
+                Write-Output "Skipping add admin to all mailboxes..."
+            }
 
 
     ## Set Time and language on all mailboxes to Eastern Standard, English USA
