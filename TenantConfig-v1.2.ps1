@@ -119,7 +119,7 @@ $Answer = Read-Host "Would you like this script to configure your Microsoft 365 
         # Exclude From CA
         try {
             $SearchCAGroupID = Get-MsolGroup -SearchString "$ExcludeFromCAGroup" | Select-Object ObjectId
-            Get-MsolGroup -ObjectId $SearchCAGroupID.ObjectId –ErrorAction Stop
+            Get-MsolGroup -ObjectId $SearchCAGroupID.ObjectId -ErrorAction Stop
         } 
         catch [System.Management.Automation.RuntimeException] {
             Write-Host -Foregroundcolor $MessageColor "Creating New Group - $ExcludeFromCAGroup"
@@ -129,7 +129,7 @@ $Answer = Read-Host "Would you like this script to configure your Microsoft 365 
         # Device Pilot
         try {
             $SearchDPGroupID = Get-MsolGroup -SearchString "$DevicePilotGroup" | Select-Object ObjectId
-            Get-MsolGroup -ObjectId $SearchDPGroupID.ObjectId –ErrorAction Stop
+            Get-MsolGroup -ObjectId $SearchDPGroupID.ObjectId -ErrorAction Stop
         }
         catch [System.Management.Automation.RuntimeException] {
             Write-Host -Foregroundcolor $MessageColor "Creating New Group - $DevicePilotGroup"
@@ -139,7 +139,7 @@ $Answer = Read-Host "Would you like this script to configure your Microsoft 365 
         # Allowed Auto-Forwarding
         try {
             $SearchFAGroupID = Get-MsolGroup -SearchString "$AllowedAutoForwarding" | Select-Object ObjectId
-            Get-MsolGroup -ObjectId $SearchFAGroupID.ObjectId –ErrorAction Stop
+            Get-MsolGroup -ObjectId $SearchFAGroupID.ObjectId -ErrorAction Stop
         }
         catch [System.Management.Automation.RuntimeException] {
             # Write-Host -Foregroundcolor $MessageColor "Creating New Group - $AllowedAutoForwarding"
@@ -149,7 +149,7 @@ $Answer = Read-Host "Would you like this script to configure your Microsoft 365 
         # Group Creators
         try {
             $SearchGCGroupID = Get-MsolGroup -SearchString "$GroupCreatorName" | Select-Object ObjectId
-            Get-MsolGroup -ObjectId $SearchGCGroupID.ObjectId –ErrorAction Stop
+            Get-MsolGroup -ObjectId $SearchGCGroupID.ObjectId -ErrorAction Stop
         }
         catch [System.Management.Automation.RuntimeException] {
             Write-Host -Foregroundcolor $MessageColor "Creating New Group - $GroupCreatorName"
@@ -159,7 +159,7 @@ $Answer = Read-Host "Would you like this script to configure your Microsoft 365 
         # Break-Glass User & make it Admin
         try {
             $SearchBGUserID = Get-MsolUser -SearchString "$BreakGlassAcccount" | Select-Object ObjectId
-            Get-MsolUser -ObjectId $SearchBGUserID.ObjectId –ErrorAction Stop
+            Get-MsolUser -ObjectId $SearchBGUserID.ObjectId -ErrorAction Stop
         }
         catch [System.Management.Automation.RuntimeException] {
             Write-Host -Foregroundcolor $MessageColor "Creating New User - $BreakGlassAcccount"
@@ -167,7 +167,7 @@ $Answer = Read-Host "Would you like this script to configure your Microsoft 365 
             $BreakGlassAccountUPN = "$BreakGlassAcccount" + "@" + "$DefaultDomain"
             New-AzureADUser -AccountEnabled $True -DisplayName "$MSPName Break-Glass" -PasswordProfile $PasswordProfile -MailNickName "$BreakGlassAcccount" -userPrincipalName $BreakGlassAccountUPN
             
-            $Role = Get-AzureADDirectoryRole | Where-Object { $_.displayName -eq “Global Administrator” }
+            $Role = Get-AzureADDirectoryRole | Where-Object { $_.displayName -eq "Global Administrator" }
             Add-AzureADDirectoryRoleMember -ObjectId $Role.ObjectId -RefObjectId $BGUser.ObjectId
         }
         
@@ -439,8 +439,8 @@ $Answer = Read-Host "Would you like this script to configure your Microsoft 365 
                 Write-Host
                 ## Enable all mailbox auditing actions
                 Get-Mailbox -ResultSize Unlimited | Set-Mailbox -AuditAdmin @{Add="Copy","Create","FolderBind","HardDelete","MessageBind","Move","MoveToDeletedItems","SendAs","SendOnBehalf","SoftDelete","Update","UpdateFolderPermissions","UpdateInboxRules","UpdateCalendarDelegation"}
-                Get-Mailbox -ResultSize Unlimited | Set-Mailbox –AuditDelegate @{Add="Create","FolderBind","HardDelete","Move","MoveToDeletedItems","SendAs","SendOnBehalf","SoftDelete","Update","UpdateFolderPermissions","UpdateInboxRules"}
-                Get-Mailbox -ResultSize Unlimited | Set-Mailbox –AuditOwner @{Add="Create","HardDelete","Move","Mailboxlogin","MoveToDeletedItems","SoftDelete","Update","UpdateFolderPermissions","UpdateInboxRules","UpdateCalendarDelegation"}
+                Get-Mailbox -ResultSize Unlimited | Set-Mailbox -AuditDelegate @{Add="Create","FolderBind","HardDelete","Move","MoveToDeletedItems","SendAs","SendOnBehalf","SoftDelete","Update","UpdateFolderPermissions","UpdateInboxRules"}
+                Get-Mailbox -ResultSize Unlimited | Set-Mailbox -AuditOwner @{Add="Create","HardDelete","Move","Mailboxlogin","MoveToDeletedItems","SoftDelete","Update","UpdateFolderPermissions","UpdateInboxRules","UpdateCalendarDelegation"}
                 Write-Host 
                 Write-host -ForegroundColor $MessageColor "All auditing actions are now enabled on all mailboxes"
                 Write-Host
