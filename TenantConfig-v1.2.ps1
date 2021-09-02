@@ -71,6 +71,10 @@ Install all modules on your powershell. Be sure to use AzureAD Preview for Conne
         ## Disable Focused Inbox
         $disableFocusedInbox = $false
 
+        # Set Mailbox Language and timezone
+        $language = "en-US"
+        $timezone = "Eastern Standard Time"
+
     # Other
         $MessageColor = "Green"
         $AssessmentColor = "Yellow"
@@ -325,7 +329,7 @@ $Answer = Read-Host "Would you like this script to configure your Microsoft 365 
     ## Set Time and language on all mailboxes to Eastern Standard, English USA
             Write-Host -ForegroundColor $AssessmentColor "Configuring Date/Time and Locale settings for each mailbox"
             Get-Mailbox -ResultSize unlimited -RecipientTypeDetails UserMailbox | Foreach-Object {
-                Set-MailboxRegionalConfiguration -Identity $PsItem.alias -Language "en-US" -TimeZone "Eastern Standard Time"
+                Set-MailboxRegionalConfiguration -Identity $PsItem.alias -Language $language -TimeZone $timezone
             }
             Write-Host
             Write-Host -ForegroundColor $MessageColor "Time, Date and Locale configured for each mailbox"
