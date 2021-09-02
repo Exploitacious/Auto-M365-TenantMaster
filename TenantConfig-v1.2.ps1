@@ -307,7 +307,7 @@ $Answer = Read-Host "Would you like this script to configure your Microsoft 365 
                     Remove-AzureADDevice -ObjectId $PSItem.ObjectId
                 }
             } else {
-                Write-Output "Skipping devie deletion, continuing script..."
+                Write-Output "Skipping device deletion, continuing script..."
             }
 
 
