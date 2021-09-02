@@ -68,6 +68,9 @@ Install all modules on your powershell. Be sure to use AzureAD Preview for Conne
         ## Allow Admin to Access all Mailboxes in Tenant
         $addAdminToMailboxes = $false
 
+        ## Disable Focused Inbox
+        $disableFocusedInbox = $false
+
     # Other
         $MessageColor = "Green"
         $AssessmentColor = "Yellow"
@@ -275,10 +278,14 @@ $Answer = Read-Host "Would you like this script to configure your Microsoft 365 
 
 
     ## Turn Off Focused Inbox Mode
-            Set-OrganizationConfig -FocusedInboxOn $false
-            Write-Host -ForegroundColor $MessageColor "Focused Inbox has been disabled across the entire Organization"
-            Write-Host
-            Write-Host
+            if($disableFocusedInbox -eq $true) {
+                Set-OrganizationConfig -FocusedInboxOn $false
+                Write-Host -ForegroundColor $MessageColor "Focused Inbox has been disabled across the entire Organization"
+                Write-Host
+                Write-Host
+            } else {
+                Write-Output "Skipping disable Focus Inbox on mailboxes..."
+            }
 
 
     ## Delete all devices not contacted system in 90 days
