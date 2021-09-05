@@ -65,6 +65,16 @@ Install all modules on your powershell. Be sure to use AzureAD Preview for Conne
         $BreakGlassAcccount = $MSPName + "BG"
         $BGAccountPass = "Powershellisbeast8442!"
 
+        ## Allow Admin to Access all Mailboxes in Tenant
+        $addAdminToMailboxes = $false
+
+        ## Disable Focused Inbox
+        $disableFocusedInbox = $false
+
+        # Set Mailbox Language and timezone
+        $language = "en-US"
+        $timezone = "Eastern Standard Time"
+
     # Other
         $MessageColor = "Green"
         $AssessmentColor = "Yellow"
@@ -119,7 +129,7 @@ $Answer = Read-Host "Would you like this script to configure your Microsoft 365 
         # Exclude From CA
         try {
             $SearchCAGroupID = Get-MsolGroup -SearchString "$ExcludeFromCAGroup" | Select-Object ObjectId
-            Get-MsolGroup -ObjectId $SearchCAGroupID.ObjectId –ErrorAction Stop
+            Get-MsolGroup -ObjectId $SearchCAGroupID.ObjectId -ErrorAction Stop
         } 
         catch [System.Management.Automation.RuntimeException] {
             Write-Host -Foregroundcolor $MessageColor "Creating New Group - $ExcludeFromCAGroup"
@@ -129,7 +139,7 @@ $Answer = Read-Host "Would you like this script to configure your Microsoft 365 
         # Device Pilot
         try {
             $SearchDPGroupID = Get-MsolGroup -SearchString "$DevicePilotGroup" | Select-Object ObjectId
-            Get-MsolGroup -ObjectId $SearchDPGroupID.ObjectId –ErrorAction Stop
+            Get-MsolGroup -ObjectId $SearchDPGroupID.ObjectId -ErrorAction Stop
         }
         catch [System.Management.Automation.RuntimeException] {
             Write-Host -Foregroundcolor $MessageColor "Creating New Group - $DevicePilotGroup"
@@ -139,7 +149,7 @@ $Answer = Read-Host "Would you like this script to configure your Microsoft 365 
         # Allowed Auto-Forwarding
         try {
             $SearchFAGroupID = Get-MsolGroup -SearchString "$AllowedAutoForwarding" | Select-Object ObjectId
-            Get-MsolGroup -ObjectId $SearchFAGroupID.ObjectId –ErrorAction Stop
+            Get-MsolGroup -ObjectId $SearchFAGroupID.ObjectId -ErrorAction Stop
         }
         catch [System.Management.Automation.RuntimeException] {
             # Write-Host -Foregroundcolor $MessageColor "Creating New Group - $AllowedAutoForwarding"
@@ -149,7 +159,7 @@ $Answer = Read-Host "Would you like this script to configure your Microsoft 365 
         # Group Creators
         try {
             $SearchGCGroupID = Get-MsolGroup -SearchString "$GroupCreatorName" | Select-Object ObjectId
-            Get-MsolGroup -ObjectId $SearchGCGroupID.ObjectId –ErrorAction Stop
+            Get-MsolGroup -ObjectId $SearchGCGroupID.ObjectId -ErrorAction Stop
         }
         catch [System.Management.Automation.RuntimeException] {
             Write-Host -Foregroundcolor $MessageColor "Creating New Group - $GroupCreatorName"
@@ -159,7 +169,7 @@ $Answer = Read-Host "Would you like this script to configure your Microsoft 365 
         # Break-Glass User & make it Admin
         try {
             $SearchBGUserID = Get-MsolUser -SearchString "$BreakGlassAcccount" | Select-Object ObjectId
-            Get-MsolUser -ObjectId $SearchBGUserID.ObjectId –ErrorAction Stop
+            Get-MsolUser -ObjectId $SearchBGUserID.ObjectId -ErrorAction Stop
         }
         catch [System.Management.Automation.RuntimeException] {
             Write-Host -Foregroundcolor $MessageColor "Creating New User - $BreakGlassAcccount"
@@ -167,7 +177,7 @@ $Answer = Read-Host "Would you like this script to configure your Microsoft 365 
             $BreakGlassAccountUPN = "$BreakGlassAcccount" + "@" + "$DefaultDomain"
             New-AzureADUser -AccountEnabled $True -DisplayName "$MSPName Break-Glass" -PasswordProfile $PasswordProfile -MailNickName "$BreakGlassAcccount" -userPrincipalName $BreakGlassAccountUPN
             
-            $Role = Get-AzureADDirectoryRole | Where-Object { $_.displayName -eq “Global Administrator” }
+            $Role = Get-AzureADDirectoryRole | Where-Object { $_.displayName -eq "Global Administrator" }
             Add-AzureADDirectoryRoleMember -ObjectId $Role.ObjectId -RefObjectId $BGUser.ObjectId
         }
         
@@ -272,10 +282,14 @@ $Answer = Read-Host "Would you like this script to configure your Microsoft 365 
 
 
     ## Turn Off Focused Inbox Mode
-            Set-OrganizationConfig -FocusedInboxOn $false
-            Write-Host -ForegroundColor $MessageColor "Focused Inbox has been disabled across the entire Organization"
-            Write-Host
-            Write-Host
+            if($disableFocusedInbox -eq $true) {
+                Set-OrganizationConfig -FocusedInboxOn $false
+                Write-Host -ForegroundColor $MessageColor "Focused Inbox has been disabled across the entire Organization"
+                Write-Host
+                Write-Host
+            } else {
+                Write-Output "Skipping disable Focus Inbox on mailboxes..."
+            }
 
 
     ## Delete all devices not contacted system in 90 days
@@ -297,21 +311,25 @@ $Answer = Read-Host "Would you like this script to configure your Microsoft 365 
                     Remove-AzureADDevice -ObjectId $PSItem.ObjectId
                 }
             } else {
-                Write-Output "Skipping devie deletion, continuing script..."
+                Write-Output "Skipping device deletion, continuing script..."
             }
 
 
     ## Allow Admin to Access all Mailboxes in Tenant
-            Get-Mailbox -ResultSize unlimited -Filter {(RecipientTypeDetails -eq 'UserMailbox') -and (Alias -ne 'Admin')} | Add-MailboxPermission -User $GlobalAdmin -AutoMapping:$false -AccessRights fullaccess -InheritanceType all
-            Write-Host
-            Write-Host -ForegroundColor $MessageColor "Access to all mailboxes has been granted to the Global Admin account supplied"
-            Write-Host
+            if($addAdminToMailboxes -eq $true) {
+                Get-Mailbox -ResultSize unlimited -Filter {(RecipientTypeDetails -eq 'UserMailbox') -and (Alias -ne 'Admin')} | Add-MailboxPermission -User $GlobalAdmin -AutoMapping:$false -AccessRights fullaccess -InheritanceType all
+                Write-Host
+                Write-Host -ForegroundColor $MessageColor "Access to all mailboxes has been granted to the Global Admin account supplied"
+                Write-Host
+            } else {
+                Write-Output "Skipping add admin to all mailboxes..."
+            }
 
 
     ## Set Time and language on all mailboxes to Eastern Standard, English USA
             Write-Host -ForegroundColor $AssessmentColor "Configuring Date/Time and Locale settings for each mailbox"
             Get-Mailbox -ResultSize unlimited -RecipientTypeDetails UserMailbox | Foreach-Object {
-                Set-MailboxRegionalConfiguration -Identity $PsItem.alias -Language "en-US" -TimeZone "Eastern Standard Time"
+                Set-MailboxRegionalConfiguration -Identity $PsItem.alias -Language $language -TimeZone $timezone
             }
             Write-Host
             Write-Host -ForegroundColor $MessageColor "Time, Date and Locale configured for each mailbox"
@@ -439,8 +457,8 @@ $Answer = Read-Host "Would you like this script to configure your Microsoft 365 
                 Write-Host
                 ## Enable all mailbox auditing actions
                 Get-Mailbox -ResultSize Unlimited | Set-Mailbox -AuditAdmin @{Add="Copy","Create","FolderBind","HardDelete","MessageBind","Move","MoveToDeletedItems","SendAs","SendOnBehalf","SoftDelete","Update","UpdateFolderPermissions","UpdateInboxRules","UpdateCalendarDelegation"}
-                Get-Mailbox -ResultSize Unlimited | Set-Mailbox –AuditDelegate @{Add="Create","FolderBind","HardDelete","Move","MoveToDeletedItems","SendAs","SendOnBehalf","SoftDelete","Update","UpdateFolderPermissions","UpdateInboxRules"}
-                Get-Mailbox -ResultSize Unlimited | Set-Mailbox –AuditOwner @{Add="Create","HardDelete","Move","Mailboxlogin","MoveToDeletedItems","SoftDelete","Update","UpdateFolderPermissions","UpdateInboxRules","UpdateCalendarDelegation"}
+                Get-Mailbox -ResultSize Unlimited | Set-Mailbox -AuditDelegate @{Add="Create","FolderBind","HardDelete","Move","MoveToDeletedItems","SendAs","SendOnBehalf","SoftDelete","Update","UpdateFolderPermissions","UpdateInboxRules"}
+                Get-Mailbox -ResultSize Unlimited | Set-Mailbox -AuditOwner @{Add="Create","HardDelete","Move","Mailboxlogin","MoveToDeletedItems","SoftDelete","Update","UpdateFolderPermissions","UpdateInboxRules","UpdateCalendarDelegation"}
                 Write-Host 
                 Write-host -ForegroundColor $MessageColor "All auditing actions are now enabled on all mailboxes"
                 Write-Host
