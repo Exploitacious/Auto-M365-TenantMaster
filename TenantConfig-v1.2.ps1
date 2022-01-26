@@ -59,17 +59,20 @@ Install all modules on your powershell. Be sure to use AzureAD Preview for Conne
         $MSPName = "Umbrella"
         $GroupCreatorName = "Group Creators"
         $ExcludeFromCAGroup = "Exclude From CA"
-        $DevicePilotGroup = "Pilot-DeviceCompliance"
-        # $AllowedAutoForwarding = "a1x AutoForwardingEnabled"
+        $DevicePilotGroup = "Pilot-IntuneDeviceCompliance"
+        $AllowedAutoForwarding = "AutoForwarding-Allowed"
 
         $BreakGlassAcccount = $MSPName + "BG"
         $BGAccountPass = "Powershellisbeast8442!"
 
         ## Allow Admin to Access all Mailboxes in Tenant
-        $addAdminToMailboxes = $false
+        $addAdminToMailboxes = $True
 
         ## Disable Focused Inbox
-        $disableFocusedInbox = $false
+        $disableFocusedInbox = $True
+
+        ## Delete Azure AD Devices Older than 90 Days
+        $confirmDeletion = $True
 
         # Set Mailbox Language and timezone
         $language = "en-US"
@@ -84,26 +87,28 @@ Install all modules on your powershell. Be sure to use AzureAD Preview for Conne
 ## Pre-Reqs
 #################################################
 
-$Answer = Read-Host "Would you like this script to configure your Microsoft 365 Environment, and DO YOU HAVE AZUREAD PREVIEW Installed? *REQUIRED*"
-    if ($Answer -eq 'y' -or $Answer -eq 'yes') {
+    $Answer = Read-Host "Would you like this script to configure your Microsoft 365 Environment, and DO YOU HAVE AZUREAD PREVIEW Installed? *REQUIRED*"
+        if ($Answer -eq 'y' -or $Answer -eq 'yes') {
 
-    Write-Host
-    Write-Host -ForegroundColor $MessageColor "Please enter your Tenant's Global Admin Credentials"
-    $Cred = Get-Credential
+        $Answer = Read-Host "Have you connected all the required PowerShell CMDlets? (ExchangeOnline, MSOLService, MSGraph, AzureAD-Preview) Y or N"
+            if ($Answer -eq 'N' -or $Answer -eq 'no') {
 
-    $Answer = Read-Host "Have you connected all the required PowerShell CMDlets? (ExchangeOnline, MSOLService, MSGraph, AzureAD-Preview) Y or N"
-        if ($Answer -eq 'N' -or $Answer -eq 'no') {
+            Write-Host
+            Write-Host -ForegroundColor $MessageColor "Please enter your Tenant's Global Admin Credentials"
+            Write-Host
+            Write-Host
 
-        Connect-ExchangeOnline -UserPrincipalName $Cred.Username
+            $Cred = Get-Credential
 
-        Connect-MsolService -Credential $Cred -AzureEnvironment AzureCloud
+            Connect-ExchangeOnline -UserPrincipalName $Cred.Username
 
-        Connect-MSGraph
+            Connect-MsolService -Credential $Cred -AzureEnvironment AzureCloud
 
-        Connect-AzureAD
+            Connect-MSGraph
 
-        }
-                
+            Connect-AzureAD
+
+            }                
 
 #################################################
 ## Let the Scripting Begin!
@@ -117,26 +122,39 @@ $Answer = Read-Host "Would you like this script to configure your Microsoft 365 
         $DefaultDomain = Get-AcceptedDomain | Where-Object{$_.Default -eq 'True'}
         $PasswordProfile = New-Object -TypeName Microsoft.Open.AzureAD.Model.PasswordProfile
         $PasswordProfile.Password = $BGAccountPass
-        $GlobalAdmin = $Cred.Username
+        $GlobalAdmin = $Cred.UserName
+
+        if ($GlobalAdmin -eq $null) {
+            Write-Host
+            Write-Host
+            $GlobalAdmin = Read-Host "Please enter your Tenant's Global Admin Full E-Mail Address or User Principal Name"
+        }
 
 
     # Enable Organization Customization Features
-
-        Enable-OrganizationCustomization
+        Write-Host
+        Write-Host
+        Enable-OrganizationCustomization -ErrorAction SilentlyContinue
+        Write-Host
+        Write-Host
+        Write-host "Organization Customization has been enabled!"
+        Write-host
 
     ## New Security Groups and BG User for easier management purposes
 
-        # Exclude From CA
+        # Create Group Exclude From CA
         try {
             $SearchCAGroupID = Get-MsolGroup -SearchString "$ExcludeFromCAGroup" | Select-Object ObjectId
+            Write-Host "Starting Query"
             Get-MsolGroup -ObjectId $SearchCAGroupID.ObjectId -ErrorAction Stop
+            Write-Host "Ending Query"
         } 
         catch [System.Management.Automation.RuntimeException] {
             Write-Host -Foregroundcolor $MessageColor "Creating New Group - $ExcludeFromCAGroup"
             New-AzureADGroup -DisplayName $ExcludeFromCAGroup -MailEnabled $false -SecurityEnabled $true -MailNickName "NotSet" -Description "Users Excluded from any Conditional Access Policies"
         }
            
-        # Device Pilot
+        # Create Group Device Pilot Group
         try {
             $SearchDPGroupID = Get-MsolGroup -SearchString "$DevicePilotGroup" | Select-Object ObjectId
             Get-MsolGroup -ObjectId $SearchDPGroupID.ObjectId -ErrorAction Stop
@@ -146,17 +164,17 @@ $Answer = Read-Host "Would you like this script to configure your Microsoft 365 
             New-AzureADGroup -DisplayName $DevicePilotGroup -MailEnabled $false -SecurityEnabled $true -MailNickName "NotSet" -Description "Intune Device Pilot Group for Testing and Deployment"
         }
 
-        # Allowed Auto-Forwarding
+        # Create Allowed Auto-Forwarding Group
         try {
             $SearchFAGroupID = Get-MsolGroup -SearchString "$AllowedAutoForwarding" | Select-Object ObjectId
             Get-MsolGroup -ObjectId $SearchFAGroupID.ObjectId -ErrorAction Stop
         }
         catch [System.Management.Automation.RuntimeException] {
-            # Write-Host -Foregroundcolor $MessageColor "Creating New Group - $AllowedAutoForwarding"
-            # New-AzureADGroup -DisplayName $AllowedAutoForwarding -MailEnabled $true -SecurityEnabled $true -MailNickName "NotSet" -Description "Users Allowed to set Auto-Forwarding Rules in Exchange Online"
+            Write-Host -Foregroundcolor $MessageColor "Creating New Group - $AllowedAutoForwarding"
+            New-DistributionGroup -Name $AllowedAutoForwarding -DisplayName $AllowedAutoForwarding -PrimarySmtpAddress $AllowedAutoForwarding@$DefaultDomain -Type "Security" -MemberJoinRestriction "Closed" -Notes "Users Allowed to set Auto-Forwarding Rules in Exchange Online"
         }
 
-        # Group Creators
+        # Create Group Creators Security Group
         try {
             $SearchGCGroupID = Get-MsolGroup -SearchString "$GroupCreatorName" | Select-Object ObjectId
             Get-MsolGroup -ObjectId $SearchGCGroupID.ObjectId -ErrorAction Stop
@@ -166,7 +184,7 @@ $Answer = Read-Host "Would you like this script to configure your Microsoft 365 
             New-AzureADGroup -DisplayName $GroupCreatorName -MailEnabled $false -SecurityEnabled $true -MailNickName "NotSet" -Description "Users Allowed to create M365 and Teams Groups"
         }
 
-        # Break-Glass User & make it Admin
+        # Create Break-Glass User & make it an Admin
         try {
             $SearchBGUserID = Get-MsolUser -SearchString "$BreakGlassAcccount" | Select-Object ObjectId
             Get-MsolUser -ObjectId $SearchBGUserID.ObjectId -ErrorAction Stop
@@ -178,68 +196,73 @@ $Answer = Read-Host "Would you like this script to configure your Microsoft 365 
             New-AzureADUser -AccountEnabled $True -DisplayName "$MSPName Break-Glass" -PasswordProfile $PasswordProfile -MailNickName "$BreakGlassAcccount" -userPrincipalName $BreakGlassAccountUPN
             
             $Role = Get-AzureADDirectoryRole | Where-Object { $_.displayName -eq "Global Administrator" }
-            Add-AzureADDirectoryRoleMember -ObjectId $Role.ObjectId -RefObjectId $BGUser.ObjectId
+            Add-AzureADDirectoryRoleMember -ObjectId $Role.ObjectId -RefObjectId $BGUserID.ObjectId
+        }
+
+
+    # Re-Setup User and Group Object ID Variables
+
+        $GlobalAdminUserID = Get-AzureADUser -SearchString $GlobalAdmin | Select-Object -ExpandProperty ObjectId
+        $BGUserID = Get-AzureADUser -SearchString $BreakGlassAcccount | Select-Object -ExpandProperty ObjectId
+
+        $SearchCAGroupID = Get-MsolGroup -SearchString "$ExcludeFromCAGroup" | Select-Object -ExpandProperty ObjectId
+        $SearchDPGroupID = Get-MsolGroup -SearchString "$DevicePilotGroup" | Select-Object -ExpandProperty ObjectId
+        $SearchFAGroupID = Get-MsolGroup -SearchString "$AllowedAutoForwarding" | Select-Object -ExpandProperty ObjectId
+        $SearchGCGroupID = Get-MsolGroup -SearchString "$GroupCreatorName" | Select-Object -ExpandProperty ObjectId
+        
+
+Write-Host "Groups have been created. Adding Admin users to groups."
+
+    # Exclude from CA - Add BGAdmin
+        try {
+            Add-AzureADGroupMember -ObjectID $SearchCAGroupID -RefObjectId $BGUserID
+            Write-Host -Foregroundcolor $MessageColor "Adding $BreakGlassAcccount to Group $ExcludeFromCAGroup"
+        } catch {
+            Write-Host -Foregroundcolor $MessageColor "$BreakGlassAcccount is already a member of $ExcludeFromCAGroup"
+        }
+
+    # Pilot Device Group - Add BGAdmin & Global Admin
+        try {
+            Add-AzureADGroupMember -ObjectID $SearchDPGroupID -RefObjectId $BGUserID
+            Write-Host -Foregroundcolor $MessageColor "Adding $BreakGlassAcccount to Group $DevicePilotGroup"
+        } catch {
+            Write-Host -Foregroundcolor $MessageColor "$BreakGlassAcccount is already a member of $DevicePilotGroup"
+        }
+
+        try {
+            Add-AzureADGroupMember -ObjectID $SearchDPGroupID -RefObjectId $BGlobalAdminUser
+            Write-Host -Foregroundcolor $MessageColor "Adding $GlobalAdmin to Group $DevicePilotGroup"
+        } catch {
+            Write-Host -Foregroundcolor $MessageColor "$GlobalAdmin is already a member of $DevicePilotGroup"
+        }
+
+    # Group Creators Group - Add BGAdmin and Global Admin
+        try {
+            Add-AzureADGroupMember -ObjectID $SearchGCGroupID -RefObjectId $BGUserID
+            Write-Host -Foregroundcolor $MessageColor "Adding $BreakGlassAcccount to Group $GroupCreatorName"
+        } catch {
+            Write-Host -Foregroundcolor $MessageColor "$BreakGlassAcccount is already a member of $GroupCreatorName"
         }
         
-        # Re-Set User and Group Object ID Variables
-
-            $GlobalAdminUser = Get-AzureADUser -SearchString $GlobalAdmin | Select-Object ObjectId
-            $BGUser = Get-AzureADUser -SearchString $BreakGlassAcccount | Select-Object ObjectId
-            $SearchCAGroupID = Get-MsolGroup -SearchString "$ExcludeFromCAGroup" | Select-Object ObjectId
-            $SearchDPGroupID = Get-MsolGroup -SearchString "$DevicePilotGroup" | Select-Object ObjectId
-        #    $SearchFAGroupID = Get-MsolGroup -SearchString "$AllowedAutoForwarding" | Select-Object ObjectId
-            $SearchGCGroupID = Get-MsolGroup -SearchString "$GroupCreatorName" | Select-Object ObjectId
-
+        try {
+            Add-AzureADGroupMember -ObjectID $SearchGCGroupID -RefObjectId $BGlobalAdminUser
+            Write-Host -Foregroundcolor $MessageColor "Adding $GlobalAdmin to Group $GroupCreatorName"
+        } catch {
+            Write-Host -Foregroundcolor $MessageColor "$GlobalAdmin is already a member of $GroupCreatorName"
+        }
             
-        # Add Users to Groups
+            # Allowed Email Forwarding Group - Add Global Admin
+        try {
+            Add-AzureADGroupMember -ObjectID $SearchFAGroupID -RefObjectId $GlobalAdminUserID
+            Write-Host -Foregroundcolor $MessageColor "Adding $GlobalAdmin to Group $AllowedAutoForwarding"
+        } catch {
+            Write-Host -Foregroundcolor $MessageColor "$GlobalAdmin is already a member of $AllowedAutoForwarding"
+        }
+                
+    }
 
-            try {
-                Get-MsolGroupMember -GroupObjectId $SearchCAGroupID.ObjectId | Select-Object $BGUser.ObjectID
-            }
-            catch [System.Management.Automation.ParameterBindingException] {
-                Write-Host -Foregroundcolor $MessageColor "Adding $BreakGlassAcccount to Group $ExcludeFromCAGroup"
-                Add-AzureADGroupMember -ObjectID $SearchCAGroupID.ObjectId -RefObjectId $BGUser.ObjectID -ErrorAction SilentlyContinue
-            }
-
-            try {
-                Get-MsolGroupMember -GroupObjectId $SearchDPGroupID.ObjectId | Select-Object $BGUser.ObjectID
-            }
-            catch [System.Management.Automation.ParameterBindingException] {
-                Write-Host -Foregroundcolor $MessageColor "Adding $BreakGlassAcccount to Group $DevicePilotGroup"
-                Add-AzureADGroupMember -ObjectID $SearchDPGroupID.ObjectId -RefObjectId $BGUser.ObjectID -ErrorAction SilentlyContinue
-            }
-
-            try {
-                Get-MsolGroupMember -GroupObjectId $SearchGCGroupID.ObjectId | Select-Object $BGUser.ObjectID
-            }
-            catch [System.Management.Automation.ParameterBindingException] {
-                Write-Host -Foregroundcolor $MessageColor "Adding $BreakGlassAcccount to Group $GroupCreatorName"
-                Add-AzureADGroupMember -ObjectID $SearchGCGroupID.ObjectId -RefObjectId $BGUser.ObjectID -ErrorAction SilentlyContinue
-            }
-
-            try {
-                Get-MsolGroupMember -GroupObjectId $SearchGCGroupID.ObjectId | Select-Object $GlobalAdminUser.ObjectID
-            }
-            catch [System.Management.Automation.ParameterBindingException] {
-                Write-Host -Foregroundcolor $MessageColor "Adding $GlobalAdmin to Group $GroupCreatorName"
-                Add-AzureADGroupMember -ObjectID $SearchGCGroupID.ObjectId -RefObjectId $BGlobalAdminUser.ObjectID -ErrorAction SilentlyContinue
-            }
-
-            try {
-                Get-MsolGroupMember -GroupObjectId $SearchDPGroupID.ObjectId | Select-Object $GlobalAdminUser.ObjectID
-            }
-            catch [System.Management.Automation.ParameterBindingException] {
-                Write-Host -Foregroundcolor $MessageColor "Adding $GlobalAdmin to Group $DevicePilotGroup"
-                Add-AzureADGroupMember -ObjectID $SearchDPGroupID.ObjectId -RefObjectId $BGlobalAdminUser.ObjectID -ErrorAction SilentlyContinue
-            }
-
-        #    Add-AzureADGroupMember -ObjectID $SearchFAGroupID.ObjectId -RefObjectId $BGUser.ObjectID, $GlobalAdminUser.ObjectID
-
-
-    #    $wshell = New-Object -ComObject Wscript.Shell
-    #    $wshell.Popup( "Your Object ID for the group " + $ExcludeFromCAGroup + " is " + $SearchCAGroupID.ObjectId)
-
-
+    Write-Host
+    Write-Host
 
     ## Check if Intune is MDM Authority. If not, set it.
             $mdmAuth = (Invoke-MSGraphRequest -Url "https://graph.microsoft.com/beta/organization('$OrgId')?`$select=mobiledevicemanagementauthority" -HttpMethod Get -ErrorAction Stop).mobileDeviceManagementAuthority
@@ -293,30 +316,28 @@ $Answer = Read-Host "Would you like this script to configure your Microsoft 365 
 
 
     ## Delete all devices not contacted system in 90 days
-            $deletionTreshold= (Get-Date).AddDays(-$deletionTresholdDays)
-            $allDevices=Get-AzureADDevice -All:$true | Where-Object {$_.ApproximateLastLogonTimeStamp -le $deletionTreshold}
-            $exportPath=$(Join-Path $PSScriptRoot "AzureADDeviceExport.csv")
+            if ($confirmDeletion -eq $true) {
+
+            $deletionTreshold = (Get-Date).AddDays(-$deletionTresholdDays)
+            $allDevices = Get-AzureADDevice -All:$true | Where-Object { $_.ApproximateLastLogonTimeStamp -le $deletionTreshold }
+
+            $exportPath = $(Join-Path $PSScriptRoot "AzureADDeviceExport.csv")
             $allDevices | Select-Object -Property DisplayName, ObjectId, ApproximateLastLogonTimeStamp, DeviceOSType, DeviceOSVersion, IsCompliant, IsManaged `
             | Export-Csv -Path $exportPath -UseCulture -NoTypeInformation
 
-            Write-Output "Find report with all devices under: $exportPath"
-            $confirmDeletion=$null
+        $allDevices | ForEach-Object {
+            Write-Output "Removing device $($PSItem.ObjectId)"
+            Remove-AzureADDevice -ObjectId $PSItem.ObjectId
+        }    
 
-            while ($confirmDeletion -notmatch "[y|n]"){
-                $confirmDeletion = Read-Host "Delete all Azure AD devices which haven't contacted your tenant since $deletionTresholdDays days (Y/N)"
-            }
-            if ($confirmDeletion -eq "y"){
-                $allDevices | ForEach-Object {
-                    Write-Output "Removing device $($PSItem.ObjectId)"
-                    Remove-AzureADDevice -ObjectId $PSItem.ObjectId
-                }
-            } else {
-                Write-Output "Skipping device deletion, continuing script..."
-            }
+            Write-Output "Find report with all deleted devices under: $exportPath"
+            Write-Host
+            Write-Host
 
 
     ## Allow Admin to Access all Mailboxes in Tenant
             if($addAdminToMailboxes -eq $true) {
+                Write-Host -ForegroundColor $AssessmentColor ""
                 Get-Mailbox -ResultSize unlimited -Filter {(RecipientTypeDetails -eq 'UserMailbox') -and (Alias -ne 'Admin')} | Add-MailboxPermission -User $GlobalAdmin -AutoMapping:$false -AccessRights fullaccess -InheritanceType all
                 Write-Host
                 Write-Host -ForegroundColor $MessageColor "Access to all mailboxes has been granted to the Global Admin account supplied"
@@ -326,21 +347,23 @@ $Answer = Read-Host "Would you like this script to configure your Microsoft 365 
             }
 
 
-    ## Set Time and language on all mailboxes to Eastern Standard, English USA
+    ## Set Time and language on all mailboxes to Set Timezone and English-USA
             Write-Host -ForegroundColor $AssessmentColor "Configuring Date/Time and Locale settings for each mailbox"
-            Get-Mailbox -ResultSize unlimited -RecipientTypeDetails UserMailbox | Foreach-Object {
+
+            Get-Mailbox -ResultSize unlimited | Foreach-Object {
                 Set-MailboxRegionalConfiguration -Identity $PsItem.alias -Language $language -TimeZone $timezone
             }
+            
             Write-Host
             Write-Host -ForegroundColor $MessageColor "Time, Date and Locale configured for each mailbox"
 
 
     ## Disable Group Creation unless User is member of 'Group Creators' Group
 
-            New-AzureADGroup -DisplayName $GroupCreatorName -MailEnabled $false -SecurityEnabled $true -MailNickName "NotSet" -Description "Users allowed to create M365 groups"
-
             $AllowGroupCreation = $False
             
+            Write-Host -ForegroundColor $AssessmentColor "Configuring Group for those allowed to create O365 Groups"
+
             $settingsObjectID = (Get-AzureADDirectorySetting | Where-object -Property Displayname -Value "Group.Unified" -EQ).id
             if(!$settingsObjectID)
                 {
@@ -430,6 +453,9 @@ $Answer = Read-Host "Would you like this script to configure your Microsoft 365 
 
 
     ## Enable Unified Audit Log Search
+            Write-Host
+            Write-Host -ForegroundColor $AssessmentColor "Enabling Unified Audit Log"
+            Write-Host
             $AuditLogConfig = Get-AdminAuditLogConfig
             if ($AuditLogConfig.UnifiedAuditLogIngestionEnabled) {
                 Write-Host 
@@ -445,7 +471,12 @@ $Answer = Read-Host "Would you like this script to configure your Microsoft 365 
                 }
 
 
-    ## Configure the audit log retention limit on all mailboxes       
+    ## Configure the audit log retention limit on all mailboxes
+
+            Write-Host
+            Write-Host -ForegroundColor $AssessmentColor "Configuring Audit Log Retention"
+            Write-Host
+       
             if ($AuditLogAgeLimit -eq $null -or $AuditLogAgeLimit -eq "" -or $AuditLogAgeLimit -eq 'n' -or $AuditLogAgeLimit -eq 'no'){
                 Write-Host
                 Write-Host -ForegroundColor $MessageColor "The audit log age limit is already enabled"
@@ -530,4 +561,4 @@ $Answer = Read-Host "Would you like this script to configure your Microsoft 365 
             Write-Host -Foregroundcolor $MessageColor "This concludes the script for Baseline Tenant Configs"
 
         }
-
+    
