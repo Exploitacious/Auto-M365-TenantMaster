@@ -124,7 +124,7 @@ Install all modules on your powershell. Be sure to use AzureAD Preview for Conne
         $PasswordProfile.Password = $BGAccountPass
         $GlobalAdmin = $Cred.UserName
 
-        if ($GlobalAdmin -eq $null) {
+        if ($null -eq $GlobalAdmin) {
             Write-Host
             Write-Host
             $GlobalAdmin = Read-Host "Please enter your Tenant's Global Admin Full E-Mail Address or User Principal Name"
@@ -338,7 +338,7 @@ Write-Host "Groups have been created. Adding Admin users to groups."
     ## Allow Admin to Access all Mailboxes in Tenant
             if($addAdminToMailboxes -eq $true) {
                 Write-Host -ForegroundColor $AssessmentColor ""
-                Get-Mailbox -ResultSize unlimited -Filter {(RecipientTypeDetails -eq 'UserMailbox') -and (Alias -ne 'Admin')} | Add-MailboxPermission -User $GlobalAdmin -AutoMapping:$false -AccessRights fullaccess -InheritanceType all
+                Get-Mailbox -ResultSize unlimited -Filter {(RecipientTypeDetails -eq 'UserMailbox') -and (Get-Alias -ne 'Admin')} | Add-MailboxPermission -User $GlobalAdmin -AutoMapping:$false -AccessRights fullaccess -InheritanceType all
                 Write-Host
                 Write-Host -ForegroundColor $MessageColor "Access to all mailboxes has been granted to the Global Admin account supplied"
                 Write-Host
@@ -442,7 +442,7 @@ Write-Host "Groups have been created. Adding Admin users to groups."
 
     ## Set Retention Limit on deleted items
             Write-Host -ForegroundColor $AssessmentColor "Current retention limit (in days and number of mailboxes):"
-            $CurrentRetention | group | select name, count | ft
+            $CurrentRetention | Group-Object | Select-Object name, count | Format-Table
 
             Get-Mailbox -ResultSize Unlimited | Set-Mailbox -RetainDeletedItemsFor 30
             Get-MailboxPlan | Set-MailboxPlan -RetainDeletedItemsFor 30
@@ -477,7 +477,7 @@ Write-Host "Groups have been created. Adding Admin users to groups."
             Write-Host -ForegroundColor $AssessmentColor "Configuring Audit Log Retention"
             Write-Host
        
-            if ($AuditLogAgeLimit -eq $null -or $AuditLogAgeLimit -eq "" -or $AuditLogAgeLimit -eq 'n' -or $AuditLogAgeLimit -eq 'no'){
+            if ($null -eq $AuditLogAgeLimit -or $AuditLogAgeLimit -eq "" -or $AuditLogAgeLimit -eq 'n' -or $AuditLogAgeLimit -eq 'no'){
                 Write-Host
                 Write-Host -ForegroundColor $MessageColor "The audit log age limit is already enabled"
             } else {
