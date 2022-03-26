@@ -104,6 +104,8 @@ Install all modules on your powershell. Be sure to use AzureAD Preview for Conne
 
             Connect-MsolService -Credential $Cred -AzureEnvironment AzureCloud
 
+            Connect-AipService -Credential $Cred
+
             Connect-MSGraph
 
             Connect-AzureAD
@@ -136,6 +138,8 @@ Install all modules on your powershell. Be sure to use AzureAD Preview for Conne
         Write-Host
         Enable-OrganizationCustomization -ErrorAction SilentlyContinue
         Write-Host
+        Write-Host
+        Enable-AipService
         Write-Host
         Write-host "Organization Customization has been enabled!"
         Write-host
