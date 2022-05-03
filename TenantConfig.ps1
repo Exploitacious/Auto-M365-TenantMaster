@@ -73,24 +73,41 @@ Install all modules on your powershell. Be sure to use AzureAD Preview for Conne
             if ($Answer -eq 'N' -or $Answer -eq 'no') {
 
             # Terminate any existing management sessions
+            Write-Host -ForegroundColor $AssessmentColor "Removing old Powershell Sessions..."
             Get-PSSession | Remove-PSSession
 
             Write-Host
-            Write-Host -ForegroundColor $MessageColor "Please enter your Tenant's Global Admin Credentials"
-            Write-Host
-            Write-Host
+            Write-Host -ForegroundColor $MessageColor "Please enter your Tenant's Global Admin Credentials - You should see the credential prompt pop-up"
 
             $Cred = Get-Credential
 
             Connect-ExchangeOnline -UserPrincipalName $Cred.Username
+            Write-Host -ForegroundColor $MessageColor "Exchange Online Connected!"
+            Write-Host
 
             Connect-MsolService -Credential $Cred -AzureEnvironment AzureCloud
+            Write-Host -ForegroundColor $MessageColor "Microsoft Online Connected!"
+            Write-Host
 
-            Connect-AipService
+            Connect-AzureAD
+            Write-Host -ForegroundColor $MessageColor "Azure AD Powershell Connected!"
+            Write-Host
+
+            Connect-MSGraph
+            Write-Host -ForegroundColor $MessageColor "MS Graph API Connected!"
+            Write-Host
 
             Connect-MgGraph -Scopes "User.Read.All","Group.ReadWrite.All","Policy.Read.All","Policy.ReadWrite.ConditionalAccess"
+            Write-Host -ForegroundColor $MessageColor "MS Graph Management Connected!"
+            Write-Host
 
-            Connect-AzureAD 
+            Connect-AipService 
+            Write-Host -ForegroundColor $MessageColor "Azure Information Protection Connected!"
+            Write-Host
+
+            Connect-IPPSSession
+            Write-Host -ForegroundColor $MessageColor "Information Protection Service Connected!"            
+            Write-Host
 
             }                
 
@@ -106,7 +123,7 @@ Install all modules on your powershell. Be sure to use AzureAD Preview for Conne
         $DefaultDomain = Get-AcceptedDomain | Where-Object{$_.Default -eq 'True'}
         $PasswordProfile = New-Object -TypeName Microsoft.Open.AzureAD.Model.PasswordProfile
         $PasswordProfile.Password = $BGAccountPass
-        $GlobalAdmin = $Cred.UserName
+        $GlobalAdmin = $Cred.UserName #Do not change this here. You will be prompted to input your Admin Account later in the script if you elect not to log in with PSCred 
         $BreakGlassAccountUPN = "$BreakGlassAcccount" + "@" + "$DefaultDomain"
 
         if ($null -eq $GlobalAdmin) {
@@ -122,7 +139,7 @@ Install all modules on your powershell. Be sure to use AzureAD Preview for Conne
         Write-Host
         Enable-AipService -ErrorAction SilentlyContinue
         Write-Host
-        Write-host "Organization Customization has been enabled!"
+        Write-host "Organization Customization & AIP are enabled!"
         Write-host
 
     ## Disable Microsoft Security Defaults in Azure
@@ -266,30 +283,66 @@ Write-Host "Groups have been created. Adding Admin users to groups."
     Write-Host
     Write-Host
 
-    ## Check if Intune is MDM Authority. If not, set it.
-            $mdmAuth = (Invoke-MSGraphRequest -Url "https://graph.microsoft.com/beta/organization('$OrgId')?`$select=mobiledevicemanagementauthority" -HttpMethod Get -ErrorAction Stop).mobileDeviceManagementAuthority
-            if($mdmAuth -notlike "intune")
-            {
-                Write-Progress -Activity "Setting Intune as the MDM Authority" -Status "..."
-                $OrgID = (Invoke-MSGraphRequest -Url "https://graph.microsoft.com/v1.0/organization" -HttpMethod Get -ErrorAction Stop).value.id
-                Invoke-MSGraphRequest -Url "https://graph.microsoft.com/v1.0/organization/$OrgID/setMobileDeviceManagementAuthority" -HttpMethod Post -ErrorAction Stop
-            }
-            Write-Host -ForegroundColor $MessageColor "Intune is set as the MDM Authority"
-            Write-Host
+    ## Create a new EOP/Azure Admin Role with all available admin permissions and add the Admin accounts to it
+        $Roles = @(
+            "Attack Simulator Admin",
+            "Audit Logs",
+            "Billing Admin",
+            "Case Management",
+            "Communication",
+            "Communication Compliance Admin",
+            "Compliance Administrator",
+            "Compliance Manager Administration",
+            "Compliance Search",
+            "Custodian",
+            "Data Classification Content Viewer",
+            "Data Classification Feedback Provider",
+            "Data Classification Feedback Reviewer",
+            "Data Classification List Viewer",
+            "Data Connector Admin",
+            "Data Investigation Management",
+            "Device Management",
+            "Disposition Management",
+            "DLP Compliance Management",
+            "Export",
+            "Hold",
+            "IB Compliance Management",
+            "Information Protection Admin",
+            "Insider Risk Management Admin",
+            "Knowledge Admin",
+            "Manage Alerts",
+            "MyBaseOptions",
+            "Organization Configuration",
+            "Preview",
+            "Privacy Management Admin",
+            "Quarantine",
+            "RecordManagement",
+            "Retention Management",
+            "Review",
+            "RMS Decrypt",
+            "Role Management",
+            # "Search And Purge",
+            "Security Administrator",
+            "Sensitivity Label Administrator",
+            "Service Assurance View",
+            "Subject Rights Request Admin",
+            "Supervisory Review Administrator",
+            "Tag Manager",
+            "Tenant AllowBlockList Manager"
+        )
 
+        $Members = @(
+            "$GlobalAdmin",
+            "$BreakGlassAccountUPN"
+        )
 
-    ## Enable Modern Authentication
-             if ($OrgConfig.OAuth2ClientProfileEnabled) {
-                 Write-Host 
-                 Write-Host -ForegroundColor $MessageColor "Modern Authentication for Exchange Online is already enabled"
-             } else {
-                Write-Host
-                Write-Host -ForegroundColor $AssessmentColor "Modern Authentication for Exchange online is not enabled... enabling now"
-                Write-Host 
-                Set-OrganizationConfig -OAuth2ClientProfileEnabled $true
-                Write-Host 
-                Write-Host -ForegroundColor $MessageColor "Modern Authentication is now enabled"
-             }
+        try {
+            Get-RoleGroup "$MSPName Super Admin" -ErrorAction Stop
+        }
+        catch {
+            New-RoleGroup -Name "$MSPName Super Admin" -DisplayName "$MSPName Super Admin" -Description "Includes All Standard EOP Admin Roles for $MSPName" -Roles $Roles -Members $Members
+            Write-Host -Foregroundcolor $MessageColor "'$MSPName Super Admin' Role Group created"
+        }
 
 
     ## Enable Send-from-Alias Preview Feature
@@ -325,9 +378,9 @@ Write-Host "Groups have been created. Adding Admin users to groups."
             Set-OrganizationConfig -DisablePlusAddressInRecipients $False
             Write-Host -ForegroundColor $MessageColor "Plus Addressing Enabled. Find out more here: https://docs.microsoft.com/en-us/exchange/recipients-in-exchange-online/plus-addressing-in-exchange-online"
 
-    ## Enable All Available Mail-Tips for Office 365
+    ## Enable (Not Annoying) Available Mail-Tips for Office 365
         Set-OrganizationConfig -MailTipsAllTipsEnabled $True
-        Set-OrganizationConfig -MailTipsExternalRecipientsTipsEnabled $True
+        Set-OrganizationConfig -MailTipsExternalRecipientsTipsEnabled $False
         Set-OrganizationConfig -MailTipsGroupMetricsEnabled $True
         Set-OrganizationConfig -MailTipsMailboxSourcedTipsEnabled $True
         Set-OrganizationConfig -MailTipsLargeAudienceThreshold $True
@@ -359,6 +412,32 @@ Write-Host "Groups have been created. Adding Admin users to groups."
             Set-OwaMailboxPolicy -Identity OwaMailboxPolicy-Default -FeedbackEnabled $False
             Set-OwaMailboxPolicy -Identity OwaMailboxPolicy-Default -UserVoiceEnabled $false
             Write-Host -ForegroundColor $MessageColor "Feedback & User Voice in OWA is disabled"
+
+
+    ## Check if Intune is MDM Authority. If not, set it.
+        $mdmAuth = (Invoke-MSGraphRequest -Url "https://graph.microsoft.com/beta/organization('$OrgId')?`$select=mobiledevicemanagementauthority" -HttpMethod Get -ErrorAction Stop).mobileDeviceManagementAuthority
+        if ($mdmAuth -notlike "intune") {
+            Write-Progress -Activity "Setting Intune as the MDM Authority" -Status "..."
+            $OrgID = (Invoke-MSGraphRequest -Url "https://graph.microsoft.com/v1.0/organization" -HttpMethod Get -ErrorAction Stop).value.id
+            Invoke-MSGraphRequest -Url "https://graph.microsoft.com/v1.0/organization/$OrgID/setMobileDeviceManagementAuthority" -HttpMethod Post -ErrorAction Stop
+        }
+        Write-Host -ForegroundColor $MessageColor "Intune is set as the MDM Authority"
+        Write-Host
+
+
+    ## Enable Modern Authentication
+        if ($OrgConfig.OAuth2ClientProfileEnabled) {
+            Write-Host 
+            Write-Host -ForegroundColor $MessageColor "Modern Authentication for Exchange Online is already enabled"
+        }
+        else {
+            Write-Host
+            Write-Host -ForegroundColor $AssessmentColor "Modern Authentication for Exchange online is not enabled... enabling now"
+            Write-Host 
+            Set-OrganizationConfig -OAuth2ClientProfileEnabled $true
+            Write-Host 
+            Write-Host -ForegroundColor $MessageColor "Modern Authentication is now enabled"
+        }
 
 
     ## Delete all devices not contacted system in set number of days
