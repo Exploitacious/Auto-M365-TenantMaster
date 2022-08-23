@@ -32,7 +32,7 @@ $AuditLogAgeLimit = 730 # This is the max retention limit for Business Premium L
 $MSPName = "Umbrella"
 $GroupCreatorName = "Group Creators"
 $ExcludeFromCAGroup = "Exclude From CA"
-$DevicePilotGroup = "Pilot-IntuneDeviceCompliance"
+$DevicePilotGroup = "Pilot-Compliance"
 $AllowedAutoForwarding = "AutoForwarding-Allowed"
 
 $BreakGlassAcccount = $MSPName + "BG"
@@ -61,6 +61,10 @@ $timezone = "Eastern Standard Time"
 $MessageColor = "Green"
 $AssessmentColor = "Yellow"
 $ErrorColor = "Red"
+# Increase the Function Count in Powershell
+$MaximumFunctionCount = 8192
+# Increase the Variable Count in Powershell
+$MaximumVariableCount = 8192
 
 
 #################################################
@@ -75,7 +79,7 @@ if ($Answer -eq 'y' -or $Answer -eq 'yes') {
     Get-PSSession | Remove-PSSession
 
     Write-Host
-    Write-Host $MessageColor "Checking for Installed Modules..."
+    Write-Host -ForegroundColor $AssessmentColor "Checking for Installed Modules..."
 
     $Modules = @(
         "ExchangeOnlineManagement"; 
@@ -93,7 +97,7 @@ if ($Answer -eq 'y' -or $Answer -eq 'yes') {
                 Import-Module -Name $Module
             }
             catch {
-                Write-Host "$Module is not ready. Please uninstall and re-install this module."
+                Write-Host -ForegroundColor $ErrorColor "$Module is not ready. Please uninstall and re-install this module."
             }
         }
         else {
@@ -112,15 +116,17 @@ if ($Answer -eq 'y' -or $Answer -eq 'yes') {
                 if ($null -ne $minimalVersion) {
                     $optionalArgs['RequiredVersion'] = $minimalVersion
                 }  
-                Write-Warning ('Install module {0} (version [{1}]) within scope of the current user.' -f $Module, $minimalVersion)
-                Install-Module -Name $Module @optionalArgs -Force -Verbose
+                Write-Warning ('Install module {0} (version [{1}])' -f $Module, $minimalVersion)
+                Install-Module -Name $Module @optionalArgs -Force
             } 
         }
     }
 }
 
 
-Write-Host -ForegroundColor $MessageColor "Please enter your Tenant's Global Admin Credentials - You should see the credential prompt pop-up"
+Write-Host -ForegroundColor $AssesmentColor "Check the modules listed above. If you see an errors, please check the module or restart the script."
+Write-Host
+Write-Host -ForegroundColor $MessageColor "Once ready, please enter your Tenant's Global Admin Credentials - You may see the credential prompt pop-up behind this window"
 Write-Host
 $Cred = Get-Credential
 
@@ -161,11 +167,11 @@ Catch {
 try {
     # MS.Graph Management
     Connect-MgGraph -Scopes "User.Read.All", "Group.ReadWrite.All", "Policy.Read.All", "Policy.ReadWrite.ConditionalAccess" -ErrorAction Stop
-    Write-Host -ForegroundColor $MessageColor "MS Graph Management Connected!"
+    Write-Host -ForegroundColor $MessageColor "MG Graph Management Connected!"
     Write-Host
 }
 catch {
-    Write-Host -ForegroundColor $ErrorColor "MS Graph Management is not ready. Please try uninstalling and re-installing the module or restarting the script."
+    Write-Host -ForegroundColor $ErrorColor "MG Graph Management is not ready. Please try uninstalling and re-installing the module or restarting the script."
     Exit
 }
 
