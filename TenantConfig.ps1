@@ -124,7 +124,7 @@ if ($Answer -eq 'y' -or $Answer -eq 'yes') {
 }
 
 
-Write-Host -ForegroundColor $AssesmentColor "Check the modules listed above. If you see an errors, please check the module or restart the script."
+Write-Host -ForegroundColor $AssessmentColor "Check the modules listed above. If you see an errors, please check the module or restart the script."
 Write-Host
 Write-Host -ForegroundColor $MessageColor "Once ready, please enter your Tenant's Global Admin Credentials - You may see the credential prompt pop-up behind this window"
 Write-Host
