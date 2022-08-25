@@ -62,9 +62,9 @@ $MessageColor = "Green"
 $AssessmentColor = "Yellow"
 $ErrorColor = "Red"
 # Increase the Function Count in Powershell
-$MaximumFunctionCount = 8192
+$MaximumFunctionCount = 32768
 # Increase the Variable Count in Powershell
-$MaximumVariableCount = 8192
+$MaximumVariableCount = 32768
 
 
 #################################################
@@ -83,10 +83,14 @@ if ($Answer -eq 'y' -or $Answer -eq 'yes') {
         "ExchangeOnlineManagement"; 
         "MSOnline";
         "AzureADPreview";
+        "MSGRAPH";
+        "Microsoft.Graph.Intune";
         "Microsoft.Graph.DeviceManagement";
         "Microsoft.Graph.Compliance";
         "Microsoft.Graph.Users";
         "Microsoft.Graph.Groups";
+        "Microsoft.Graph.Identity.SignIns";
+        "Microsoft.Graph.Authentication";
         "AIPService"
     )
 
@@ -152,10 +156,9 @@ if ($Answer -eq 'y' -or $Answer -eq 'yes') {
 
 } 
 
-Write-Host -ForegroundColor $MessageColor "Verify your modules and hit Y in the next prompt and enter your Tenant's Global Admin Credentials - You may see the credential prompt pop-up behind this window"
-
-$Answer = Read-Host "Are you ready to configure your Microsoft 365 Environment? (Y / N)"
+$Answer = Read-Host "Would you like the script to connect all modules? ('N' to skip automatic module connection)"
 if ($Answer -eq 'y' -or $Answer -eq 'yes') {
+
 
     $Cred = Get-Credential
 
@@ -193,6 +196,18 @@ if ($Answer -eq 'y' -or $Answer -eq 'yes') {
     Write-Host -ForegroundColor $MessageColor "Information Protection Service Connected!"            
     Write-Host
 
+    # MSGRAPH (Old School)
+    Connect-MSGraph
+    Write-Host -ForegroundColor $MessageColor "MS Graph Service Connected!"
+    Write-Host
+
+    Write-Host
+    Write-Host -ForegroundColor $MessageColor "Verify your modules and hit Y in the next prompt and enter your Tenant's Global Admin Credentials - You may see the credential prompt pop-up behind this window"
+
+}
+
+$Answer = Read-Host "Are you ready to configure your Microsoft 365 Environment? (Y / N)"
+if ($Answer -eq 'y' -or $Answer -eq 'yes') {
 
 
     #################################################
@@ -304,6 +319,15 @@ if ($Answer -eq 'y' -or $Answer -eq 'yes') {
     }
 
 
+    # Timeout to let the groups and users settle in
+    $Time = 6
+    $Lenght = $Time / 100
+    For ($Time; $Time -gt 0; $Time--) {
+        $min = [int](([string]($Time / 60)).split('.')[0])
+        $text = " " + $min + " minutes " + ($Time % 60) + " seconds left"
+        Write-Progress -Activity "Watiting for New Groups and Users to settle in..." -Status $Text -PercentComplete ($Time / $Lenght)
+        Start-Sleep 1
+    }
     # Re-Setup User and Group Object ID Variables
 
     $GlobalAdminUserID = Get-AzureADUser -SearchString $GlobalAdmin | Select-Object -ExpandProperty ObjectId
@@ -410,7 +434,7 @@ if ($Answer -eq 'y' -or $Answer -eq 'yes') {
         "Review",
         "RMS Decrypt",
         "Role Management",
-        # "Search And Purge",
+        # "Search And Purge", this one's broken or something
         "Security Administrator",
         "Sensitivity Label Administrator",
         "Service Assurance View",
@@ -465,7 +489,7 @@ if ($Answer -eq 'y' -or $Answer -eq 'yes') {
     Write-Host -ForegroundColor $MessageColor "Enabled Naming Scheme for Distribution Lists: 'DL_<GroupName>'"
 
     ## Enable Plus Addressing
-    Set-OrganizationConfig -AllowPlusAddressInRecipients $True
+    #    Set-OrganizationConfig -AllowPlusAddressInRecipients $True
     Set-OrganizationConfig -DisablePlusAddressInRecipients $False
     Write-Host -ForegroundColor $MessageColor "Plus Addressing Enabled. Find out more here: https://docs.microsoft.com/en-us/exchange/recipients-in-exchange-online/plus-addressing-in-exchange-online"
 
@@ -537,7 +561,7 @@ if ($Answer -eq 'y' -or $Answer -eq 'yes') {
         $deletionTreshold = (Get-Date).AddDays(-$deletionTresholdDays)
         $allDevices = Get-AzureADDevice -All:$true | Where-Object { $_.ApproximateLastLogonTimeStamp -le $deletionTreshold }
 
-        $exportPath = $(Join-Path $PSScriptRoot "AzureADDeviceExport_$DefaultDomain.csv")
+        $exportPath = $(Join-Path $PSScriptRoot "AzureADDeviceExport_$DefaultDomain $(Get-Date -f yyyy-MM-dd).csv")
         $allDevices | Select-Object -Property DisplayName, ObjectId, ApproximateLastLogonTimeStamp, DeviceOSType, DeviceOSVersion, IsCompliant, IsManaged `
         | Export-Csv -Path $exportPath -UseCulture -NoTypeInformation
 
@@ -554,8 +578,8 @@ if ($Answer -eq 'y' -or $Answer -eq 'yes') {
         ## Allow Admin to Access all Mailboxes in Tenant
         if ($addAdminToMailboxes -eq $true) {
             Write-Host -ForegroundColor $AssessmentColor ""
-            Get-Mailbox -ResultSize unlimited -Filter { (RecipientTypeDetails -eq 'UserMailbox') -and (Get-Alias -ne 'Admin') } | Add-MailboxPermission -User $GlobalAdmin -AutoMapping:$false -AccessRights fullaccess -InheritanceType all
-            Get-Mailbox -ResultSize unlimited -Filter { (RecipientTypeDetails -eq 'UserMailbox') -and (Get-Alias -ne 'Admin') } | Add-MailboxPermission -User $BreakGlassAccountUPN -AutoMapping:$false -AccessRights fullaccess -InheritanceType all
+            Get-Mailbox -ResultSize unlimited -Filter { (RecipientTypeDetails -eq 'UserMailbox') -and (Alias -ne 'Admin') } | Add-MailboxPermission -User $GlobalAdmin -AutoMapping:$false -AccessRights fullaccess -InheritanceType all
+            Get-Mailbox -ResultSize unlimited -Filter { (RecipientTypeDetails -eq 'UserMailbox') -and (Alias -ne 'Admin') } | Add-MailboxPermission -User $BreakGlassAccountUPN -AutoMapping:$false -AccessRights fullaccess -InheritanceType all
             Write-Host
             Write-Host -ForegroundColor $MessageColor "Access to all mailboxes has been granted to the Global Admin account supplied"
             Write-Host
