@@ -90,50 +90,74 @@ if ($Answer -eq 'y' -or $Answer -eq 'yes') {
     )
 
     Foreach ($Module In $Modules) {
+        $currentVersion = $null
+        if ($null -ne (Get-InstalledModule -Name $Module -ErrorAction SilentlyContinue)) {
+            $currentVersion = (Get-InstalledModule -Name $module -AllVersions).Version
+        }
 
-        if (Get-Module -Name $Module -ListAvailable | Where-Object { $null -eq $minimalVersion -or $minimalVersion -lt $_.Version } | Select-Object -Last 1) {
-            Write-Host "$Module is installed and ready."
+        $CurrentModule = Find-Module -Name $module
+
+        if ($null -eq $currentVersion) {
+            Write-Host -ForegroundColor $AssessmentColor "$($CurrentModule.Name) - Installing $Module from PowerShellGallery. Version: $($CurrentModule.Version). Release date: $($CurrentModule.PublishedDate)"
             try {
-                Import-Module -Name $Module
+                Install-Module -Name $module -Force
             }
             catch {
-                Write-Host -ForegroundColor $ErrorColor "$Module is not ready. Please uninstall and re-install this module."
+                Write-Host -ForegroundColor $ErrorColor "Something went wrong when installing $Module. Please uninstall and try re-installing this module. (Remove-Module, Install-Module) Details:"
+                Write-Host -ForegroundColor $ErrorColor "$_.Exception.Message"
             }
         }
-        else {
-            Import-Module -Name 'PowershellGet'
-            $installedModule = Get-InstalledModule -Name $Module -ErrorAction SilentlyContinue
-            if ($null -ne $installedModule) {
-                Write-Verbose ('Module [{0}] (v {1}) is installed.' -f $Module, $installedModule.Version)
+        elseif ($CurrentModule.Version -eq $currentVersion) {
+            Write-Host -ForegroundColor $MessageColor "$($CurrentModule.Name) is installed and ready. Version: ($currentVersion. Release date: $($CurrentModule.PublishedDate))"
+        }
+        elseif ($currentVersion.count -gt 1) {
+            Write-Warning "$module is installed in $($currentVersion.count) versions (versions: $($currentVersion -join ' | '))"
+            Write-Host -ForegroundColor $ErrorColor "Uninstalling previous $module versions and will attempt to update."
+            try {
+                Get-InstalledModule -Name $module -AllVersions | Where-Object { $_.Version -ne $CurrentModule.Version } | Uninstall-Module -Force
             }
-            if ($null -eq $installedModule -or ($null -ne $minimalVersion -and $installedModule.Version -lt $minimalVersion)) {
-                Write-Verbose ('Module {0} min.vers {1}: not installed; checking if nuget v2.8.5.201 or later is installed.' -f $Module, $minimalVersion)
-                if ((Get-PackageProvider -Name NuGet -Force).Version -lt '2.8.5.201') {
-                    Write-Warning ('Module {0} min.vers {1}: Install nuget!' -f $Module, $minimalVersion)
-                    Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Scope CurrentUser -Force
-                }        
-                $optionalArgs = New-Object -TypeName Hashtable
-                if ($null -ne $minimalVersion) {
-                    $optionalArgs['RequiredVersion'] = $minimalVersion
-                }  
-                Write-Warning ('Install module {0} (version [{1}])' -f $Module, $minimalVersion)
-                Install-Module -Name $Module @optionalArgs -Force
-            } 
+            catch {
+                Write-Host -ForegroundColor $ErrorColor "Something went wrong with Uninstalling $Module previous versions. Please Completely uninstall and re-install this module. (Remove-Module) Details:"
+                Write-Host -ForegroundColor red "$_.Exception.Message"
+            }
+        
+            Write-Host -ForegroundColor $AssessmentColor "$($CurrentModule.Name) - Installing version from PowerShellGallery $($CurrentModule.Version). Release date: $($CurrentModule.PublishedDate)"  
+    
+            try {
+                Install-Module -Name $module -Force
+                Write-Host -ForegroundColor $MessageColor "$Module Successfully Installed"
+            }
+            catch {
+                Write-Host -ForegroundColor $ErrorColor "Something went wrong with installing $Module. Details:"
+                Write-Host -ForegroundColor red "$_.Exception.Message"
+            }
+        }
+        else {       
+            Write-Host -ForegroundColor $AssessmentColor "$($CurrentModule.Name) - Updating from PowerShellGallery from version $currentVersion to $($CurrentModule.Version). Release date: $($CurrentModule.PublishedDate)" 
+            try {
+                Update-Module -Name $module -Force
+                Write-Host -ForegroundColor $MessageColor "$Module Successfully Updated"
+            }
+            catch {
+                Write-Host -ForegroundColor $ErrorColor "Something went wrong with updating $Module. Details:"
+                Write-Host -ForegroundColor red "$_.Exception.Message"
+            }
         }
     }
-}
+} 
 
 
+Write-Host
+Write-Host
 Write-Host -ForegroundColor $AssessmentColor "Check the modules listed above. If you see an errors, please check the module or restart the script."
-Write-Host
 Write-Host -ForegroundColor $MessageColor "Once ready, please enter your Tenant's Global Admin Credentials - You may see the credential prompt pop-up behind this window"
-Write-Host
+
 $Cred = Get-Credential
 
 
 Try {
     # Exchange
-    Connect-ExchangeOnline -UserPrincipalName $Cred.Username -ErrorAction Stop
+    Connect-ExchangeOnline -UserPrincipalName $Cred.Username
     Write-Host -ForegroundColor $MessageColor "Exchange Online Connected!"
     Write-Host
 }
@@ -144,7 +168,7 @@ catch {
         
 try {
     # MSOnlinePreview
-    Connect-MsolService -Credential $Cred -AzureEnvironment AzureCloud -ErrorAction Stop
+    Connect-MsolService -Credential $Cred -AzureEnvironment AzureCloud
     Write-Host -ForegroundColor $MessageColor "Microsoft Online Connected!"
     Write-Host
 }
@@ -155,7 +179,7 @@ Catch {
 
 try {
     # AzureAD Preview
-    Connect-AzureAD -ErrorAction Stop
+    Connect-AzureAD 
     Write-Host -ForegroundColor $MessageColor "Azure AD Preview Powershell Connected!"
     Write-Host
 }
@@ -166,7 +190,7 @@ Catch {
 
 try {
     # MS.Graph Management
-    Connect-MgGraph -Scopes "User.Read.All", "Group.ReadWrite.All", "Policy.Read.All", "Policy.ReadWrite.ConditionalAccess" -ErrorAction Stop
+    Connect-MgGraph -Scopes "User.Read.All", "Group.ReadWrite.All", "Policy.Read.All", "Policy.ReadWrite.ConditionalAccess"
     Write-Host -ForegroundColor $MessageColor "MG Graph Management Connected!"
     Write-Host
 }
@@ -177,7 +201,7 @@ catch {
 
 try {
     # Azure Information Protection
-    Connect-AipService -ErrorAction Stop
+    Connect-AipService
     Write-Host -ForegroundColor $MessageColor "Azure Information Protection Connected!"
     Write-Host
 }
