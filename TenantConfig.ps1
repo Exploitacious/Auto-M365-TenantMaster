@@ -74,8 +74,6 @@ $MaximumVariableCount = 32768
 $Answer = Read-Host "Would you like this script to run a check to make sure you have all the modules correctly installed? *Recommended*. DO YOU HAVE AZUREAD PREVIEW Installed? *REQUIRED*"
 if ($Answer -eq 'y' -or $Answer -eq 'yes') {
 
-    # Terminate any existing management sessions
-
     Write-Host
     Write-Host -ForegroundColor $AssessmentColor "Checking for Installed Modules..."
 
@@ -310,7 +308,7 @@ if ($Answer -eq 'y' -or $Answer -eq 'yes') {
     catch [System.Management.Automation.RuntimeException] {
         Write-Host -ForegroundColor $MessageColor "Creating New User - $BreakGlassAcccount"
 
-        New-AzureADUser -AccountEnabled $True -DisplayName "$MSPName Break-Glass" -PasswordProfile $PasswordProfile -MailNickName "$BreakGlassAcccount" -userPrincipalName $BreakGlassAccountUPN
+        New-AzureADUser -AccountEnabled $True -DisplayName "$MSPName Break-Glass" -PasswordProfile $PasswordProfile -MailNickName "$BreakGlassAcccount" -UserPrincipalName $BreakGlassAccountUPN
             
         $BGUserID = Get-AzureADUser -SearchString $BreakGlassAcccount | Select-Object -ExpandProperty ObjectId
 
@@ -343,7 +341,7 @@ if ($Answer -eq 'y' -or $Answer -eq 'yes') {
 
     # Exclude from CA - Add BGAdmin
     try {
-        Add-AzureADGroupMember -ObjectID $SearchCAGroupID -RefObjectId $BGUserID
+        Add-AzureADGroupMember -ObjectId $SearchCAGroupID -RefObjectId $BGUserID
         Write-Host -ForegroundColor $MessageColor "Adding $BreakGlassAccountUPN to Group $ExcludeFromCAGroup"
     }
     catch {
@@ -352,7 +350,7 @@ if ($Answer -eq 'y' -or $Answer -eq 'yes') {
 
     # Pilot Device Group - Add BGAdmin & Global Admin
     try {
-        Add-AzureADGroupMember -ObjectID $SearchDPGroupID -RefObjectId $BGUserID
+        Add-AzureADGroupMember -ObjectId $SearchDPGroupID -RefObjectId $BGUserID
         Write-Host -ForegroundColor $MessageColor "Adding $BreakGlassAccountUPN to Group $DevicePilotGroup"
     }
     catch {
@@ -360,7 +358,7 @@ if ($Answer -eq 'y' -or $Answer -eq 'yes') {
     }
 
     try {
-        Add-AzureADGroupMember -ObjectID $SearchDPGroupID -RefObjectId $BGlobalAdminUser
+        Add-AzureADGroupMember -ObjectId $SearchDPGroupID -RefObjectId $BGlobalAdminUser
         Write-Host -ForegroundColor $MessageColor "Adding $GlobalAdmin to Group $DevicePilotGroup"
     }
     catch {
@@ -369,7 +367,7 @@ if ($Answer -eq 'y' -or $Answer -eq 'yes') {
 
     # Group Creators Group - Add BGAdmin and Global Admin
     try {
-        Add-AzureADGroupMember -ObjectID $SearchGCGroupID -RefObjectId $BGUserID
+        Add-AzureADGroupMember -ObjectId $SearchGCGroupID -RefObjectId $BGUserID
         Write-Host -ForegroundColor $MessageColor "Adding $BreakGlassAcccount to Group $GroupCreatorName"
     }
     catch {
@@ -377,7 +375,7 @@ if ($Answer -eq 'y' -or $Answer -eq 'yes') {
     }
         
     try {
-        Add-AzureADGroupMember -ObjectID $SearchGCGroupID -RefObjectId $BGlobalAdminUser
+        Add-AzureADGroupMember -ObjectId $SearchGCGroupID -RefObjectId $BGlobalAdminUser
         Write-Host -ForegroundColor $MessageColor "Adding $GlobalAdmin to Group $GroupCreatorName"
     }
     catch {
@@ -386,7 +384,7 @@ if ($Answer -eq 'y' -or $Answer -eq 'yes') {
             
     # Allowed Email Forwarding Group - Add Global Admin
     try {
-        Add-AzureADGroupMember -ObjectID $SearchFAGroupID -RefObjectId $GlobalAdminUserID
+        Add-AzureADGroupMember -ObjectId $SearchFAGroupID -RefObjectId $GlobalAdminUserID
         Write-Host -ForegroundColor $MessageColor "Adding $GlobalAdmin to Group $AllowedAutoForwarding"
     }
     catch {
