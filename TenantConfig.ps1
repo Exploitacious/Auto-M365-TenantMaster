@@ -71,11 +71,22 @@ $MaximumVariableCount = 32768
 ## Pre-Reqs
 #################################################
 
-$Answer = Read-Host "Would you like this script to run a check to make sure you have all the modules correctly installed? *Recommended*. DO YOU HAVE AZUREAD PREVIEW Installed? *REQUIRED*"
+$Answer = Read-Host "Would you like this script to run a pre-requisite check to make sure you have all the modules correctly installed? * RECOMMENDED * (Will automatically install and updated required modules)"
 if ($Answer -eq 'y' -or $Answer -eq 'yes') {
 
     Write-Host
     Write-Host -ForegroundColor $AssessmentColor "Checking for Installed Modules..."
+
+
+    try {
+        Get-InstalledModule "AzureAD" -ErrorAction Stop
+        Write-Host -ForegroundColor $ErrorColor "AzureAD (non Preview) was found. Attempting to remove before continuing."
+        Get-InstalledModule -Name "AzureAD" -AllVersions | Uninstall-Module -Force
+    }
+    catch {
+        Write-Host -ForegroundColor $MessageColor "AzureAD (non Preview) was not detected."
+    }
+
 
     $Modules = @(
         "ExchangeOnlineManagement"; 
@@ -151,12 +162,19 @@ if ($Answer -eq 'y' -or $Answer -eq 'yes') {
     Write-Host
     Write-Host
     Write-Host -ForegroundColor $AssessmentColor "Check the modules listed in the verification above. If you see an errors, please check the module(s) or restart the script to try and auto-fix."
+    Write-Host "Most common error is that you have 'AzureAD' instead of 'AzureADPreview' installed. Please remove AzureAD and try again."
+    Write-Host "You can re-run this part of the script as many times as necessary until all modules are up to date and correctly installed."
+    Write-Host -ForegroundColor $MessageColor "You should see ALL GREEN above."
+    Write-Host
 
 } 
 
-$Answer = Read-Host "Would you like the script to connect all modules? ('N' to skip automatic module connection)"
+$Answer = Read-Host "Would you like the script to CONNECT all modules? ('N' to skip automatic module connection, if you have already done so.)"
 if ($Answer -eq 'y' -or $Answer -eq 'yes') {
 
+    Write-Host
+    Write-Host -ForegroundColor $MessageColor "Enter your Tenant's Global Admin Credentials - You may see the PS credential prompt pop-up behind this window."
+    Write-Host -ForegroundColor $AssessmentColor "You may be asked to sign in multiple times as each module loads and connects."
 
     $Cred = Get-Credential
 
@@ -180,7 +198,7 @@ if ($Answer -eq 'y' -or $Answer -eq 'yes') {
     Write-Host
 
     # MS.Graph Management
-    Connect-MgGraph -Scopes "User.Read.All", "Group.ReadWrite.All", "Policy.Read.All", "Policy.ReadWrite.ConditionalAccess"
+    Connect-MgGraph -Scopes "User.Read.All", "Group.ReadWrite.All", "Policy.Read.All", "Policy.ReadWrite.ConditionalAccess", "DeviceManagementServiceConfiguration.ReadWrite.All", "DeviceManagementServiceConfig.ReadWrite.All"
     Write-Host -ForegroundColor $MessageColor "MG Graph Management Connected!"
     Write-Host
 
@@ -200,7 +218,7 @@ if ($Answer -eq 'y' -or $Answer -eq 'yes') {
     Write-Host
 
     Write-Host
-    Write-Host -ForegroundColor $MessageColor "Verify your modules and hit Y in the next prompt and enter your Tenant's Global Admin Credentials - You may see the credential prompt pop-up behind this window"
+    Write-Host -ForegroundColor $AssessmentColor "Verify your module connections. You should see all green above with no errors."
 
 }
 
@@ -317,15 +335,12 @@ if ($Answer -eq 'y' -or $Answer -eq 'yes') {
     }
 
 
+    Write-Host -ForegroundColor $MessageColor "Users and Groups have been created. Please allow the script to idle for about 2 minutes before continuing."
+    Write-Host "This will allow the new users and groups to settle in and make their UID's availble for us. You can end this script here and come back later if necessary."
+
     # Timeout to let the groups and users settle in
-    $Time = 6
-    $Lenght = $Time / 100
-    For ($Time; $Time -gt 0; $Time--) {
-        $min = [int](([string]($Time / 60)).split('.')[0])
-        $text = " " + $min + " minutes " + ($Time % 60) + " seconds left"
-        Write-Progress -Activity "Watiting for New Groups and Users to settle in..." -Status $Text -PercentComplete ($Time / $Lenght)
-        Start-Sleep 1
-    }
+    Start-Sleep -Seconds 120
+
     # Re-Setup User and Group Object ID Variables
 
     $GlobalAdminUserID = Get-AzureADUser -SearchString $GlobalAdmin | Select-Object -ExpandProperty ObjectId
@@ -747,7 +762,7 @@ if ($Answer -eq 'y' -or $Answer -eq 'yes') {
 
         ## Set up Archive Mailbox and Legal Hold for all available users (Must have Proper Licensing from Microsoft)
 
-        $Answer = Read-Host "Do you want to configure Archiving and Litigation Hold features? NOTE: Requires Exchange Online Plan 2 or Exchange Online Archiving add-on; Y or N "
+        $Answer = Read-Host "Do you want to configure Archiving and Litigation Hold features? (Recommended)"
         if ($Answer -eq 'y' -or $Answer -eq 'yes') {
 
             ## Check whether the auto-expanding archive feature is enabled, and if not, enable it
@@ -768,7 +783,7 @@ if ($Answer -eq 'y' -or $Answer -eq 'yes') {
 
             ## Prompt whether or not to enable the Archive mailbox for all users
             Write-Host 
-            $ArchiveAnswer = Read-Host "Do you want to enable the Archive mailbox for all user mailboxes? Y or N "
+            $ArchiveAnswer = Read-Host "Do you want to enable the Archive mailbox for all user mailboxes? Y or N (Recommended)"
             if ($ArchiveAnswer -eq 'y' -or $ArchiveAnswer -eq 'yes') {
                 Get-Mailbox -ResultSize Unlimited -Filter { ArchiveStatus -Eq "None" -AND RecipientTypeDetails -eq "UserMailbox" } | Enable-Mailbox -Archive
                 Write-Host 
