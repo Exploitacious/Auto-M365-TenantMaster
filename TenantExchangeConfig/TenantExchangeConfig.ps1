@@ -1,6 +1,6 @@
 <#
 #################################################
-## Tenant & Exchange Configs Master v2
+## Tenant & Exchange Configs Master
 #################################################
 
 This script automates a lot of the set up process of M365 Tenants and some of Exchange Online.
