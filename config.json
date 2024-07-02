@@ -1,0 +1,8 @@
+{
+  "ScriptPaths": {
+    "ModuleUpdater": "M365ModuleUpdater\\M365ModuleUpdater.ps1",
+    "TenantExchangeConfig": "TenantExchangeConfig\\TenantExchangeConfig.ps1",
+    "ATPConfig": "AdvancedThreatProtection\\ATPConfig.ps1",
+    "DLPConfig": "DataLossPrevention\\DLPConfig.ps1"
+  }
+}
