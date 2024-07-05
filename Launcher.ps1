@@ -67,7 +67,7 @@ function Show-Menu {
     Write-Host
     Write-Host "================ $Title ================"
     Write-Host
-    Write-Host "1: Update/Install Required Modules"
+    Write-Host "1: Install/Update and Connect Required Modules"
     Write-Host "2: Configure M365 Tenant and Exchange Online"
     Write-Host "3: Configure ATP (Advanced Threat Protection)"
     Write-Host "4: Configure DLP (Data Loss Prevention)"

@@ -1,834 +1,745 @@
-<#
-#################################################
-## Tenant & Exchange Configs Master
-#################################################
+# Comprehensive M365 Tenant and Exchange Configuration Script
 
-This script automates a lot of the set up process of M365 Tenants and some of Exchange Online.
-This script is safe to run in any stage of the tenant deployment procedure (but should be run in the begining) and should have none, if any negative end-user experience disruption if tenant already in production.
+# Import required modules
+Import-Module ExchangeOnlineManagement
+Import-Module AzureADPreview
+Import-Module MSOnline
+# Import-Module Microsoft.Graph.Identity.SignIns
 
+# Initialize variables
+$scriptPath = $PSScriptRoot
+$logFile = Join-Path $scriptPath "TenantExchangeConfig_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
+$configFile = Join-Path $scriptPath "config.json"
 
-Install all modules on your powershell. Be sure to use AzureAD Preview for Connect-AzureAD.
-
-    Connect to Exchange Online via PowerShell using MFA (Connect-ExchangeOnline)
-    https://docs.microsoft.com/en-us/powershell/exchange/exchange-online/connect-to-exchange-online-powershell/mfa-connect-to-exchange-online-powershell?view=exchange-ps
-
-    Connect to Azure Active Directory via PowerShell using MFA (Connect-MsolService)
-    https://docs.microsoft.com/en-us/powershell/module/msonline/connect-msolservice?view=azureadps-1.0
-
-    Connect to Azure Active Directory Preview Service via Powershell using MFA (Connect-AzureAD)
-    https://docs.microsoft.com/en-us/powershell/azure/active-directory/install-adv2?view=azureadps-2.0
-
-    Connect to the Microsoft Graph API Service via Powershell using MFA (Connect-MGGraph)
-    https://docs.microsoft.com/en-us/graph/powershell/installation
-
-#>
-
-#################################################
-## Variables & Options
-#################################################
-
-$AuditLogAgeLimit = 730 # This is the max retention limit for Business Premium License
-
-$MSPName = "Umbrella"
-$GroupCreatorName = "Group Creators"
-$ExcludeFromCAGroup = "Exclude From CA"
-$DevicePilotGroup = "Pilot-Compliance"
-$AllowedAutoForwarding = "AutoForwarding-Allowed"
-
-$BreakGlassAcccount = $MSPName + "BG"
-$BGAccountPass = "Powershellisbeast8442!"
-
-##### Optional Items: Depending on your configuration, you may or may not want to set these. Set Value to $False if you want the script to skip this step.
-    
-## Allow Admin to Access ALL Mailboxes in Tenant True/False
-$addAdminToMailboxes = $True
-
-## Disable Focused Inbox
-$disableFocusedInbox = $True
-
-## Delete Azure AD Devices Older than x number of days
-$confirmDeletion = $True
-$deletionTresholdDays = 90 
-
-## Disable Microsoft Security Defaults in Azure
-$SecurityDefaultsDisabled = $True
-
-# Set Mailbox Language and timezone
-$language = "en-US"
-$timezone = "Eastern Standard Time"
-
-# Other
-$MessageColor = "Green"
-$AssessmentColor = "Yellow"
-$ErrorColor = "Red"
-# Increase the Function Count in Powershell
-$MaximumFunctionCount = 32768
-# Increase the Variable Count in Powershell
-$MaximumVariableCount = 32768
-
-
-#################################################
-## Pre-Reqs
-#################################################
-
-$Answer = Read-Host "Would you like this script to run a pre-requisite check to make sure you have all the modules correctly installed? * RECOMMENDED * (Will automatically install and updated required modules)"
-if ($Answer -eq 'y' -or $Answer -eq 'yes') {
-
-    Write-Host
-    Write-Host -ForegroundColor $AssessmentColor "Checking for Installed Modules..."
-
-
-    try {
-        Get-InstalledModule "AzureAD" -ErrorAction Stop
-        Write-Host -ForegroundColor $ErrorColor "AzureAD (non Preview) was found. Attempting to remove before continuing."
-        Get-InstalledModule -Name "AzureAD" -AllVersions | Uninstall-Module -Force
-    }
-    catch {
-        Write-Host -ForegroundColor $MessageColor "AzureAD (non Preview) was not detected."
-    }
-
-
-    $Modules = @(
-        "ExchangeOnlineManagement"; 
-        "MSOnline";
-        "AzureADPreview";
-        "MSGRAPH";
-        "Microsoft.Graph.Intune";
-        "Microsoft.Graph.DeviceManagement";
-        "Microsoft.Graph.Compliance";
-        "Microsoft.Graph.Users";
-        "Microsoft.Graph.Groups";
-        "Microsoft.Graph.Identity.SignIns";
-        "Microsoft.Graph.Authentication";
-        "AIPService"
+# Function to write log messages
+function Write-Log {
+    param (
+        [string]$Message,
+        [string]$Level = "INFO"
     )
-
-    Foreach ($Module In $Modules) {
-        $currentVersion = $null
-        if ($null -ne (Get-InstalledModule -Name $Module -ErrorAction SilentlyContinue)) {
-            $currentVersion = (Get-InstalledModule -Name $module -AllVersions).Version
-        }
-
-        $CurrentModule = Find-Module -Name $module
-
-        if ($null -eq $currentVersion) {
-            Write-Host -ForegroundColor $AssessmentColor "$($CurrentModule.Name) - Installing $Module from PowerShellGallery. Version: $($CurrentModule.Version). Release date: $($CurrentModule.PublishedDate)"
-            try {
-                Install-Module -Name $module -Force
-            }
-            catch {
-                Write-Host -ForegroundColor $ErrorColor "Something went wrong when installing $Module. Please uninstall and try re-installing this module. (Remove-Module, Install-Module) Details:"
-                Write-Host -ForegroundColor $ErrorColor "$_.Exception.Message"
-            }
-        }
-        elseif ($CurrentModule.Version -eq $currentVersion) {
-            Write-Host -ForegroundColor $MessageColor "$($CurrentModule.Name) is installed and ready. Version: ($currentVersion. Release date: $($CurrentModule.PublishedDate))"
-        }
-        elseif ($currentVersion.count -gt 1) {
-            Write-Warning "$module is installed in $($currentVersion.count) versions (versions: $($currentVersion -join ' | '))"
-            Write-Host -ForegroundColor $ErrorColor "Uninstalling previous $module versions and will attempt to update."
-            try {
-                Get-InstalledModule -Name $module -AllVersions | Where-Object { $_.Version -ne $CurrentModule.Version } | Uninstall-Module -Force
-            }
-            catch {
-                Write-Host -ForegroundColor $ErrorColor "Something went wrong with Uninstalling $Module previous versions. Please Completely uninstall and re-install this module. (Remove-Module) Details:"
-                Write-Host -ForegroundColor red "$_.Exception.Message"
-            }
-        
-            Write-Host -ForegroundColor $AssessmentColor "$($CurrentModule.Name) - Installing version from PowerShellGallery $($CurrentModule.Version). Release date: $($CurrentModule.PublishedDate)"  
-    
-            try {
-                Install-Module -Name $module -Force
-                Write-Host -ForegroundColor $MessageColor "$Module Successfully Installed"
-            }
-            catch {
-                Write-Host -ForegroundColor $ErrorColor "Something went wrong with installing $Module. Details:"
-                Write-Host -ForegroundColor red "$_.Exception.Message"
-            }
-        }
-        else {       
-            Write-Host -ForegroundColor $AssessmentColor "$($CurrentModule.Name) - Updating from PowerShellGallery from version $currentVersion to $($CurrentModule.Version). Release date: $($CurrentModule.PublishedDate)" 
-            try {
-                Update-Module -Name $module -Force
-                Write-Host -ForegroundColor $MessageColor "$Module Successfully Updated"
-            }
-            catch {
-                Write-Host -ForegroundColor $ErrorColor "Something went wrong with updating $Module. Details:"
-                Write-Host -ForegroundColor red "$_.Exception.Message"
-            }
-        }
-    }
-
-    Write-Host
-    Write-Host
-    Write-Host -ForegroundColor $AssessmentColor "Check the modules listed in the verification above. If you see an errors, please check the module(s) or restart the script to try and auto-fix."
-    Write-Host "Most common error is that you have 'AzureAD' instead of 'AzureADPreview' installed. Please remove AzureAD and try again."
-    Write-Host "You can re-run this part of the script as many times as necessary until all modules are up to date and correctly installed."
-    Write-Host -ForegroundColor $MessageColor "You should see ALL GREEN above."
-    Write-Host
-
-} 
-
-$Answer = Read-Host "Would you like the script to CONNECT all modules? ('N' to skip automatic module connection, if you have already done so.)"
-if ($Answer -eq 'y' -or $Answer -eq 'yes') {
-
-    Write-Host
-    Write-Host -ForegroundColor $MessageColor "Enter your Tenant's Global Admin Credentials - You may see the PS credential prompt pop-up behind this window."
-    Write-Host -ForegroundColor $AssessmentColor "You may be asked to sign in multiple times as each module loads and connects."
-
-    $Cred = Get-Credential
-
-    Write-Host
-    Write-Host -ForegroundColor $AssessmentColor "Removing old Powershell Sessions and establishing new ones..."
-    Get-PSSession | Remove-PSSession
-
-    # Exchange
-    Connect-ExchangeOnline -UserPrincipalName $Cred.Username
-    Write-Host -ForegroundColor $MessageColor "Exchange Online Connected!"
-    Write-Host
-
-    # MSOnlinePreview
-    Connect-MsolService -Credential $Cred -AzureEnvironment AzureCloud
-    Write-Host -ForegroundColor $MessageColor "Microsoft Online Connected!"
-    Write-Host
-
-    # AzureAD Preview
-    Connect-AzureAD 
-    Write-Host -ForegroundColor $MessageColor "Azure AD Preview Powershell Connected!"
-    Write-Host
-
-    # MS.Graph Management
-    Connect-MgGraph -Scopes "User.Read.All", "Group.ReadWrite.All", "Policy.Read.All", "Policy.ReadWrite.ConditionalAccess", "DeviceManagementServiceConfiguration.ReadWrite.All", "DeviceManagementServiceConfig.ReadWrite.All"
-    Write-Host -ForegroundColor $MessageColor "MG Graph Management Connected!"
-    Write-Host
-
-    # Azure Information Protection
-    Connect-AipService
-    Write-Host -ForegroundColor $MessageColor "Azure Information Protection Connected!"
-    Write-Host
-
-    # Information Protection Service
-    Connect-IPPSSession
-    Write-Host -ForegroundColor $MessageColor "Information Protection Service Connected!"            
-    Write-Host
-
-    # MSGRAPH (Old School)
-    Connect-MSGraph
-    Write-Host -ForegroundColor $MessageColor "MS Graph Service Connected!"
-    Write-Host
-
-    Write-Host
-    Write-Host -ForegroundColor $AssessmentColor "Verify your module connections. You should see all green above with no errors."
-
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $logMessage = "[$timestamp] [$Level] $Message"
+    Add-Content -Path $logFile -Value $logMessage
+    Write-Host $logMessage
 }
 
-$Answer = Read-Host "Are you ready to configure your Microsoft 365 Environment? (Y / N)"
-if ($Answer -eq 'y' -or $Answer -eq 'yes') {
-
-
-    #################################################
-    ## Let the Scripting Begin!
-    #################################################
-
-    ## Set a few more variables
-
-    $SharedMailboxes = Get-Mailbox -ResultSize Unlimited -Filter { RecipientTypeDetails -Eq "SharedMailbox" }
-    $CurrentRetention = (Get-Mailbox -ResultSize Unlimited).RetainDeletedItemsFor
-    $OrgConfig = Get-OrganizationConfig 
-    $DefaultDomain = Get-AcceptedDomain | Where-Object { $_.Default -eq 'True' }
-    $PasswordProfile = New-Object -TypeName Microsoft.Open.AzureAD.Model.PasswordProfile
-    $PasswordProfile.Password = $BGAccountPass
-    $GlobalAdmin = $Cred.UserName #Do not change this here. You will be prompted to input your Admin Account later in the script if you elect not to log in with PSCred 
-    $BreakGlassAccountUPN = "$BreakGlassAcccount" + "@" + "$DefaultDomain"
-
-    if ($null -eq $GlobalAdmin) {
-        Write-Host
-        Write-Host
-        $GlobalAdmin = Read-Host "Please enter your Tenant's Global Admin Full E-Mail Address or User Principal Name"
+# Function to load configuration
+function Load-Configuration {
+    if (Test-Path $configFile) {
+        $config = Get-Content $configFile | ConvertFrom-Json
     }
+    else {
+        Write-Log "Configuration file not found. Using default values." "WARNING"
+        Write-Host
+        $UDGlobalAdminUPN = Read-Host "Enter the Global Admin UPN"
+        Write-Host
 
-
-    # Enable Organization Customization Features
-    Write-Host
-    Enable-OrganizationCustomization -ErrorAction SilentlyContinue
-    Write-Host
-    Enable-AipService -ErrorAction SilentlyContinue
-    Write-Host
-    Write-Host "Organization Customization & AIP are enabled!"
-    Write-Host
-
-    ## Disable Microsoft Security Defaults in Azure
-    if ($SecurityDefaultsDisabled -eq $True) {
-        Import-Module Microsoft.Graph.Identity.SignIns
-        $params = @{
-            IsEnabled = $false
+        $config = @{
+            GlobalAdminUPN             = $UDGlobalAdminUPN
+            AuditLogAgeLimit           = 730
+            MSPName                    = "Umbrella"
+            GroupCreatorsGroupName     = "Group Creators"
+            ExcludeFromCAGroupName     = "Exclude From CA"
+            DevicePilotGroupName       = "Pilot-DeviceCompliance"
+            AllowedAutoForwardingGroup = "AutoForwarding-Allowed"
+            BreakGlassAccountPass      = "Powershellisbeast8442!"
+            AdminAccessToMailboxes     = $true
+            DisableFocusedInbox        = $true
+            DeleteStaleDevices         = $true
+            StaleDeviceThresholdDays   = 90
+            DisableSecurityDefaults    = $true
+            Language                   = "en-US"
+            Timezone                   = "Eastern Standard Time"
         }
-        Update-MgPolicyIdentitySecurityDefaultEnforcementPolicy -BodyParameter $params
+        $Config | ConvertTo-Json | Out-File "$scriptPath\config.json"
+    }
+    return $config
+}
+
+# Function to check prerequisites
+function Check-Prerequisites {
+
+    $Modules = @(
+        "ExchangeOnlineManagement",
+        "MSOnline",
+        "AzureADPreview",
+        "MSGRAPH",
+        "Microsoft.Graph.Intune",
+        "Microsoft.Graph.DeviceManagement",
+        "Microsoft.Graph.Compliance",
+        "Microsoft.Graph.Users",
+        "Microsoft.Graph.Groups",
+        "Microsoft.Graph.Identity.SignIns",
+        "Microsoft.Graph.Authentication",
+        "Microsoft.Graph.Security",
+        "AIPService",
+        "MicrosoftTeams",
+        "Microsoft.Online.SharePoint.PowerShell"
+    )
+
+    foreach ($module in $modules) {
+        if (!(Get-Module -ListAvailable -Name $module)) {
+            Write-Log "Required module $module is not installed. Please install it and try again." "ERROR"
+            exit
+        }
+    }
+    Write-Log "All required modules are installed." "INFO"
+}
+
+# Function to verify service connections
+function Verify-ServiceConnections {
+    try {
+        Get-OrganizationConfig -ErrorAction Stop | Out-Null
+        Get-AzureADTenantDetail -ErrorAction Stop | Out-Null
+        Get-MsolCompanyInformation -ErrorAction Stop | Out-Null
+        get-CsTeamsChannelsPolicy -ErrorAction Stop | Out-Null
+        Get-RetentionCompliancePolicy -ErrorAction Stop | Out-Null
+
+        Write-Log "Verified connections to Exchange Online, Azure AD, and MSOnline" "INFO"
+    }
+    catch {
+        Write-Log "Not connected to one or more required services. Please run the Module Updater and Connection script first." "ERROR"
+        exit
+    }
+}
+
+# Function to configure Exchange Online settings
+function Set-ExchangeOnlineConfig {
+    param ($Config)
+    
+    try {
+        # Enable Organization Customization
+        Enable-OrganizationCustomization -ErrorAction SilentlyContinue
+        Enable-AipService -ErrorAction SilentlyContinue
         Write-Host
-        Write-Host -ForegroundColor $MessageColor "Microsoft Security Defaults in Azure have been disabled!"
-        Write-Host -ForegroundColor $AssessmentColor "Make sure you enable Conditional Access Policies!"
-    }
-    else {
-        Write-Host -ForegroundColor $MessageColor "Leaving Microsoft Security Defaults as Default!"
-    }
+        Write-Log "Organization Customization & AIP are enabled" "INFO"
 
-    Write-Host
-    Write-Host
+        # Configure Send-from-Alias
+        if (!(Get-OrganizationConfig).SendFromAliasEnabled) {
+            Set-OrganizationConfig -SendFromAliasEnabled $true
+            Write-Log "Send-From-Alias is now enabled" "INFO"
+        }
 
-    ## New Security Groups and BG User for easier management purposes
+        # Disable Focused Inbox
+        if ($Config.DisableFocusedInbox) {
+            Set-OrganizationConfig -FocusedInboxOn $false
+            Write-Log "Focused Inbox has been disabled across the entire Organization" "INFO"
+        }
 
-    # Create Group Exclude From CA
-    try {
-        $SearchCAGroupID = Get-MsolGroup -SearchString "$ExcludeFromCAGroup" | Select-Object ObjectId
-        Write-Host "Starting Query"
-        Get-MsolGroup -ObjectId $SearchCAGroupID.ObjectId -ErrorAction Stop
-    } 
-    catch [System.Management.Automation.RuntimeException] {
-        Write-Host -ForegroundColor $MessageColor "Creating New Group - $ExcludeFromCAGroup"
-        New-AzureADGroup -DisplayName $ExcludeFromCAGroup -MailEnabled $false -SecurityEnabled $true -MailNickName "NotSet" -Description "Users Excluded from any Conditional Access Policies"
-    }
-           
-    # Create Group Device Pilot Group
-    try {
-        $SearchDPGroupID = Get-MsolGroup -SearchString "$DevicePilotGroup" | Select-Object ObjectId
-        Get-MsolGroup -ObjectId $SearchDPGroupID.ObjectId -ErrorAction Stop
-    }
-    catch [System.Management.Automation.RuntimeException] {
-        Write-Host -ForegroundColor $MessageColor "Creating New Group - $DevicePilotGroup"
-        New-AzureADGroup -DisplayName $DevicePilotGroup -MailEnabled $false -SecurityEnabled $true -MailNickName "NotSet" -Description "Intune Device Pilot Group for Testing and Deployment"
-    }
+        # Enable Naming Scheme for Distribution Lists
+        Set-OrganizationConfig -DistributionGroupNamingPolicy "DL_<GroupName>"
+        Write-Log "Enabled Naming Scheme for Distribution Lists: 'DL_<GroupName>'" "INFO"
 
-    # Create Allowed Auto-Forwarding Group
-    try {
-        $SearchFAGroupID = Get-MsolGroup -SearchString "$AllowedAutoForwarding" | Select-Object ObjectId
-        Get-MsolGroup -ObjectId $SearchFAGroupID.ObjectId -ErrorAction Stop
-    }
-    catch [System.Management.Automation.RuntimeException] {
-        Write-Host -ForegroundColor $MessageColor "Creating New Group - $AllowedAutoForwarding"
-        New-DistributionGroup -Name $AllowedAutoForwarding -DisplayName $AllowedAutoForwarding -PrimarySmtpAddress $AllowedAutoForwarding@$DefaultDomain -Type "Security" -MemberJoinRestriction "Closed" -Notes "Users Allowed to set Auto-Forwarding Rules in Exchange Online"
-    }
+        # Enable Plus Addressing
+        Set-OrganizationConfig -DisablePlusAddressInRecipients $False
+        Write-Log "Plus Addressing Enabled" "INFO"
 
-    # Create Group Creators Security Group
-    try {
-        $SearchGCGroupID = Get-MsolGroup -SearchString "$GroupCreatorName" | Select-Object ObjectId
-        Get-MsolGroup -ObjectId $SearchGCGroupID.ObjectId -ErrorAction Stop
-    }
-    catch [System.Management.Automation.RuntimeException] {
-        Write-Host -ForegroundColor $MessageColor "Creating New Group - $GroupCreatorName"
-        New-AzureADGroup -DisplayName $GroupCreatorName -MailEnabled $false -SecurityEnabled $true -MailNickName "NotSet" -Description "Users Allowed to create M365 and Teams Groups"
-    }
+        # Configure Mail-Tips
+        Set-OrganizationConfig -MailTipsAllTipsEnabled $True -MailTipsExternalRecipientsTipsEnabled $False -MailTipsGroupMetricsEnabled $True -MailTipsMailboxSourcedTipsEnabled $True -MailTipsLargeAudienceThreshold "10"
+        Write-Log "Mail-Tip Features Configured" "INFO"
 
-    # Create Break-Glass User & make it an Admin
-    try {
-        $SearchBGUserID = Get-MsolUser -SearchString "$BreakGlassAcccount" | Select-Object ObjectId
-        Get-MsolUser -ObjectId $SearchBGUserID.ObjectId -ErrorAction Stop
-    }
-    catch [System.Management.Automation.RuntimeException] {
-        Write-Host -ForegroundColor $MessageColor "Creating New User - $BreakGlassAcccount"
+        # Enable Read Email Tracking
+        Set-OrganizationConfig -ReadTrackingEnabled $True
+        Write-Log "Email Read-Tracking Enabled" "INFO"
 
-        New-AzureADUser -AccountEnabled $True -DisplayName "$MSPName Break-Glass" -PasswordProfile $PasswordProfile -MailNickName "$BreakGlassAcccount" -UserPrincipalName $BreakGlassAccountUPN
-            
-        $BGUserID = Get-AzureADUser -SearchString $BreakGlassAcccount | Select-Object -ExpandProperty ObjectId
+        # Enable Public Computer Detection (For OWA)
+        Set-OrganizationConfig -PublicComputersDetectionEnabled $True
+        Write-Log "Public Computer Tracking is enabled" "INFO"
 
-        $Role = Get-AzureADDirectoryRole | Where-Object { $_.displayName -eq "Global Administrator" }
-        Add-AzureADDirectoryRoleMember -ObjectId $Role.ObjectId -RefObjectId $BGUserID.ObjectId
-    }
+        # Disable Outlook Pay
+        Set-OrganizationConfig -OutlookPayEnabled $False
+        Write-Log "Outlook Pay (Microsoft Pay) is disabled" "INFO"
 
+        # Enable Lean Pop-Outs for OWA in Edge
+        Set-OrganizationConfig -LeanPopoutEnabled $True
+        Write-Log "Lean Pop-Outs for OWA in Edge are Enabled" "INFO"
 
-    Write-Host -ForegroundColor $MessageColor "Users and Groups have been created. Please allow the script to idle for about 2 minutes before continuing."
-    Write-Host "This will allow the new users and groups to settle in and make their UID's availble for us. You can end this script here and come back later if necessary."
+        # Enable Outlook Events Recognition
+        Set-OrganizationConfig -EnableOutlookEvents $True
+        Set-OwaMailboxPolicy -Identity OwaMailboxPolicy-Default -LocalEventsEnabled $True
+        Write-Log "Outlook Events Tracking is Enabled" "INFO"
 
-    # Timeout to let the groups and users settle in
-    Start-Sleep -Seconds 120
+        # Disable Feedback in Outlook Online
+        Set-OwaMailboxPolicy -Identity OwaMailboxPolicy-Default -FeedbackEnabled $False -UserVoiceEnabled $false
+        Write-Log "Feedback & User Voice in OWA is disabled" "INFO"
 
-    # Re-Setup User and Group Object ID Variables
+        # Enable Modern Authentication
+        if (!(Get-OrganizationConfig).OAuth2ClientProfileEnabled) {
+            Set-OrganizationConfig -OAuth2ClientProfileEnabled $true
+            Write-Log "Modern Authentication is now enabled" "INFO"
+        }
 
-    $GlobalAdminUserID = Get-AzureADUser -SearchString $GlobalAdmin | Select-Object -ExpandProperty ObjectId
-    $BGUserID = Get-AzureADUser -SearchString $BreakGlassAcccount | Select-Object -ExpandProperty ObjectId
+        # Block Consumer Storage in OWA
+        if ((Get-OwaMailboxPolicy -Identity OwaMailboxPolicy-Default).AdditionalStorageProvidersAvailable) {
+            Get-OwaMailboxPolicy | Set-OwaMailboxPolicy -AdditionalStorageProvidersAvailable $False
+            Write-Log "Consumer storage locations in OWA are now disabled" "INFO"
+        }
 
-    $SearchCAGroupID = Get-MsolGroup -SearchString "$ExcludeFromCAGroup" | Select-Object -ExpandProperty ObjectId
-    $SearchDPGroupID = Get-MsolGroup -SearchString "$DevicePilotGroup" | Select-Object -ExpandProperty ObjectId
-    $SearchFAGroupID = Get-MsolGroup -SearchString "$AllowedAutoForwarding" | Select-Object -ExpandProperty ObjectId
-    $SearchGCGroupID = Get-MsolGroup -SearchString "$GroupCreatorName" | Select-Object -ExpandProperty ObjectId
-        
+        # Block Attachment Download on Unmanaged Assets OWA
+        if ((Get-OwaMailboxPolicy -Identity OwaMailboxPolicy-Default).ConditionalAccessPolicy -eq 'Off') {
+            Get-OwaMailboxPolicy | Set-OwaMailboxPolicy -ConditionalAccessPolicy ReadOnly
+            Write-Log "Attachment download on unmanaged devices is now disabled" "INFO"
+        }
 
-    Write-Host "Groups have been created. Adding Admin users to groups."
+        # Set Retention Limit on deleted items
+        Get-Mailbox -ResultSize Unlimited | Set-Mailbox -RetainDeletedItemsFor 30
+        Get-MailboxPlan | Set-MailboxPlan -RetainDeletedItemsFor 30
+        Write-Log "Deleted items will be retained for 30 days for all mailboxes" "INFO"
 
-    # Exclude from CA - Add BGAdmin
-    try {
-        Add-AzureADGroupMember -ObjectId $SearchCAGroupID -RefObjectId $BGUserID
-        Write-Host -ForegroundColor $MessageColor "Adding $BreakGlassAccountUPN to Group $ExcludeFromCAGroup"
+        # Enable Unified Audit Log Search
+        if (!(Get-AdminAuditLogConfig).UnifiedAuditLogIngestionEnabled) {
+            Set-AdminAuditLogConfig -UnifiedAuditLogIngestionEnabled $true
+            Write-Log "Unified Audit Log Search is now enabled" "INFO"
+        }
+
+        # Configure Audit Log Retention
+        Set-OrganizationConfig -AuditDisabled $False
+        Get-Mailbox -ResultSize Unlimited | Set-Mailbox -AuditEnabled $true -AuditLogAgeLimit $Config.AuditLogAgeLimit
+        Write-Log "Audit Log Retention configured for all mailboxes" "INFO"
+
+        # Enable all mailbox auditing actions
+        Get-Mailbox -ResultSize Unlimited | Set-Mailbox -AuditAdmin @{Add = "Copy", "Create", "FolderBind", "HardDelete", "MailItemsAccessed", "Move", "MoveToDeletedItems", "SendAs", "SendOnBehalf", "SoftDelete", "Update", "UpdateFolderPermissions", "UpdateInboxRules", "UpdateCalendarDelegation" }
+        Get-Mailbox -ResultSize Unlimited | Set-Mailbox -AuditDelegate @{Add = "Create", "FolderBind", "HardDelete", "Move", "MoveToDeletedItems", "SendAs", "SendOnBehalf", "SoftDelete", "Update", "UpdateFolderPermissions", "UpdateInboxRules" }
+        Get-Mailbox -ResultSize Unlimited | Set-Mailbox -AuditOwner @{Add = "Create", "HardDelete", "Move", "Mailboxlogin", "MoveToDeletedItems", "SoftDelete", "Update", "UpdateFolderPermissions", "UpdateInboxRules", "UpdateCalendarDelegation" }
+        Write-Log "All auditing actions are now enabled on all mailboxes" "INFO"
+
+        # Configure External Sender Tags
+        Write-Log "Configuring External Sender Tags in Outlook" "INFO"
+        Set-ExternalInOutlook -Enabled $true
+        Write-Log "External Sender Tags enabled in Outlook" "INFO"
+
+        # Create or update the allow list for admin users (for external sender tags)
+        $allowList = (Get-ExternalInOutlook).AllowList
+        $adminUsers = @($Config.GlobalAdminUPN, "$($Config.MSPName)BG@$((Get-AzureADTenantDetail).VerifiedDomains[0].Name)")
+
+        foreach ($user in $adminUsers) {
+            if ($user -notin $allowList) {
+                $allowList += $user
+                Write-Log "Added $user to External Sender Tags exception list" "INFO"
+            }
+            else {
+                Write-Log "$user already in External Sender Tags exception list" "INFO"
+            }
+        }
+
+        # Update the allow list
+        Set-ExternalInOutlook -AllowList $allowList
+        Write-Log "Updated External Sender Tags exception list" "INFO"
+
+        Write-Host
+        Write-Log "All Exchange Online configurations completed successfully" "INFO"
     }
     catch {
-        Write-Host -ForegroundColor $MessageColor "$BreakGlassAccountUPN is already a member of $ExcludeFromCAGroup"
+        Write-Log "Error configuring Exchange Online: $($_.Exception.Message)" "ERROR"
+        throw
     }
+}
 
-    # Pilot Device Group - Add BGAdmin & Global Admin
+# Function to configure Azure AD settings
+function Set-AzureADConfig {
+    param ($Config)
+    
     try {
-        Add-AzureADGroupMember -ObjectId $SearchDPGroupID -RefObjectId $BGUserID
-        Write-Host -ForegroundColor $MessageColor "Adding $BreakGlassAccountUPN to Group $DevicePilotGroup"
-    }
-    catch {
-        Write-Host -ForegroundColor $MessageColor "$BreakGlassAccountUPN is already a member of $DevicePilotGroup"
-    }
-
-    try {
-        Add-AzureADGroupMember -ObjectId $SearchDPGroupID -RefObjectId $BGlobalAdminUser
-        Write-Host -ForegroundColor $MessageColor "Adding $GlobalAdmin to Group $DevicePilotGroup"
-    }
-    catch {
-        Write-Host -ForegroundColor $MessageColor "$GlobalAdmin is already a member of $DevicePilotGroup"
-    }
-
-    # Group Creators Group - Add BGAdmin and Global Admin
-    try {
-        Add-AzureADGroupMember -ObjectId $SearchGCGroupID -RefObjectId $BGUserID
-        Write-Host -ForegroundColor $MessageColor "Adding $BreakGlassAcccount to Group $GroupCreatorName"
-    }
-    catch {
-        Write-Host -ForegroundColor $MessageColor "$BreakGlassAcccount is already a member of $GroupCreatorName"
-    }
-        
-    try {
-        Add-AzureADGroupMember -ObjectId $SearchGCGroupID -RefObjectId $BGlobalAdminUser
-        Write-Host -ForegroundColor $MessageColor "Adding $GlobalAdmin to Group $GroupCreatorName"
-    }
-    catch {
-        Write-Host -ForegroundColor $MessageColor "$GlobalAdmin is already a member of $GroupCreatorName"
-    }
-            
-    # Allowed Email Forwarding Group - Add Global Admin
-    try {
-        Add-AzureADGroupMember -ObjectId $SearchFAGroupID -RefObjectId $GlobalAdminUserID
-        Write-Host -ForegroundColor $MessageColor "Adding $GlobalAdmin to Group $AllowedAutoForwarding"
-    }
-    catch {
-        Write-Host -ForegroundColor $MessageColor "$GlobalAdmin is already a member of $AllowedAutoForwarding"
-    }
+        Write-Log "Starting Azure AD configuration" "INFO"
                 
-    Write-Host
-    Write-Host
-
-    ## Create a new EOP/Azure Admin Role with all available admin permissions and add the Admin accounts to it
-    $Roles = @(
-        "Attack Simulator Admin",
-        "Audit Logs",
-        "Billing Admin",
-        "Case Management",
-        "Communication",
-        "Communication Compliance Admin",
-        "Compliance Administrator",
-        "Compliance Manager Administration",
-        "Compliance Search",
-        "Custodian",
-        "Data Classification Content Viewer",
-        "Data Classification Feedback Provider",
-        "Data Classification Feedback Reviewer",
-        "Data Classification List Viewer",
-        "Data Connector Admin",
-        "Data Investigation Management",
-        "Device Management",
-        "Disposition Management",
-        "DLP Compliance Management",
-        "Export",
-        "Hold",
-        "IB Compliance Management",
-        "Information Protection Admin",
-        "Insider Risk Management Admin",
-        "Knowledge Admin",
-        "Manage Alerts",
-        "MyBaseOptions",
-        "Organization Configuration",
-        "Preview",
-        "Privacy Management Admin",
-        "Quarantine",
-        "RecordManagement",
-        "Retention Management",
-        "Review",
-        "RMS Decrypt",
-        "Role Management",
-        # "Search And Purge", this one's broken or something
-        "Security Administrator",
-        "Sensitivity Label Administrator",
-        "Service Assurance View",
-        "Subject Rights Request Admin",
-        "Supervisory Review Administrator",
-        "Tag Manager",
-        "Tenant AllowBlockList Manager"
-    )
-
-    $Members = @(
-        "$GlobalAdmin",
-        "$BreakGlassAccountUPN"
-    )
-
-    try {
-        Get-RoleGroup "$MSPName Super Admin" -ErrorAction Stop
-    }
-    catch {
-        New-RoleGroup -Name "$MSPName Super Admin" -DisplayName "$MSPName Super Admin" -Description "Includes All Standard EOP Admin Roles for $MSPName" -Roles $Roles -Members $Members
-        Write-Host -ForegroundColor $MessageColor "'$MSPName Super Admin' Role Group created"
-    }
-
-
-    ## Enable Send-from-Alias Preview Feature
-    if ($OrgConfig.SendFromAliasEnabled) {
-        Write-Host 
-        Write-Host -ForegroundColor $MessageColor "Send-From-Alias for Exchange Online is already enabled"
-    }
-    else {
-        Write-Host
-        Write-Host -ForegroundColor $AssessmentColor "Send-From-Alias for Exchange online is not enabled... enabling now"
-        Write-Host 
-        Set-OrganizationConfig -SendFromAliasEnabled $true
-        Write-Host 
-        Write-Host -ForegroundColor $MessageColor "Send-From-Alias is now enabled"
-    }
-
-
-    ## Turn Off Focused Inbox Mode
-    if ($disableFocusedInbox -eq $true) {
-        Set-OrganizationConfig -FocusedInboxOn $false
-        Write-Host -ForegroundColor $MessageColor "Focused Inbox has been disabled across the entire Organization"
-        Write-Host
-        Write-Host
-    }
-    else {
-        Write-Output "Skipping disable Focus Inbox on mailboxes..."
-    }
-
-    ## Enable Naming Scheme for Distribution Lists
-    Set-OrganizationConfig -DistributionGroupNamingPolicy "DL_<GroupName>"
-    Write-Host -ForegroundColor $MessageColor "Enabled Naming Scheme for Distribution Lists: 'DL_<GroupName>'"
-
-    ## Enable Plus Addressing
-    #    Set-OrganizationConfig -AllowPlusAddressInRecipients $True
-    Set-OrganizationConfig -DisablePlusAddressInRecipients $False
-    Write-Host -ForegroundColor $MessageColor "Plus Addressing Enabled. Find out more here: https://docs.microsoft.com/en-us/exchange/recipients-in-exchange-online/plus-addressing-in-exchange-online"
-
-    ## Enable (Not Annoying) Available Mail-Tips for Office 365
-    Set-OrganizationConfig -MailTipsAllTipsEnabled $True
-    Set-OrganizationConfig -MailTipsExternalRecipientsTipsEnabled $False
-    Set-OrganizationConfig -MailTipsGroupMetricsEnabled $True
-    Set-OrganizationConfig -MailTipsMailboxSourcedTipsEnabled $True
-    Set-OrganizationConfig -MailTipsLargeAudienceThreshold $True
-    Set-OrganizationConfig -MailTipsLargeAudienceThreshold "10"
-    Write-Host -ForegroundColor $MessageColor "All Mail-Tip Features Enabled"
-
-    ## Enable Read Email Tracking
-    Set-OrganizationConfig -ReadTrackingEnabled $True
-    Write-Host -ForegroundColor $MessageColor "Email Read-Tracking Enabled"
-
-    ## Enable Public Computer Detection (For OWA)
-    Set-OrganizationConfig -PublicComputersDetectionEnabled $True
-    Write-Host -ForegroundColor $MessageColor "Public Computer Tracking is enabled"
-
-    ## Disable Outlook Pay (Microsoft Pay)
-    Set-OrganizationConfig -OutlookPayEnabled $False
-    Write-Host -ForegroundColor $MessageColor "Outlook Pay (Microsoft Pay) is disabled"
-
-    ## Enable Lean Pop-Outs for OWA in Edge
-    Set-OrganizationConfig -LeanPopoutEnabled $True
-    Write-Host -ForegroundColor $MessageColor "Lean Pop-Outs for OWA in Edge are Enabled"
-            
-    ## Enable Outlook Events Recognition
-    Set-OrganizationConfig -EnableOutlookEvents $True
-    Set-OwaMailboxPolicy -Identity OwaMailboxPolicy-Default -LocalEventsEnabled $True
-    Write-Host -ForegroundColor $MessageColor "Outlook Events Tracking is Enabled"
-
-    ## Disable Feedback in Outlook Online
-    Set-OwaMailboxPolicy -Identity OwaMailboxPolicy-Default -FeedbackEnabled $False
-    Set-OwaMailboxPolicy -Identity OwaMailboxPolicy-Default -UserVoiceEnabled $false
-    Write-Host -ForegroundColor $MessageColor "Feedback & User Voice in OWA is disabled"
-
-
-    ## Check if Intune is MDM Authority. If not, set it.
-    $mdmAuth = (Invoke-MSGraphRequest -Url "https://graph.microsoft.com/beta/organization('$OrgId')?`$select=mobiledevicemanagementauthority" -HttpMethod Get -ErrorAction Stop).mobileDeviceManagementAuthority
-    if ($mdmAuth -notlike "intune") {
-        Write-Progress -Activity "Setting Intune as the MDM Authority" -Status "..."
-        $OrgID = (Invoke-MSGraphRequest -Url "https://graph.microsoft.com/v1.0/organization" -HttpMethod Get -ErrorAction Stop).value.id
-        Invoke-MSGraphRequest -Url "https://graph.microsoft.com/v1.0/organization/$OrgID/setMobileDeviceManagementAuthority" -HttpMethod Post -ErrorAction Stop
-    }
-    Write-Host -ForegroundColor $MessageColor "Intune is set as the MDM Authority"
-    Write-Host
-
-
-    ## Enable Modern Authentication
-    if ($OrgConfig.OAuth2ClientProfileEnabled) {
-        Write-Host 
-        Write-Host -ForegroundColor $MessageColor "Modern Authentication for Exchange Online is already enabled"
-    }
-    else {
-        Write-Host
-        Write-Host -ForegroundColor $AssessmentColor "Modern Authentication for Exchange online is not enabled... enabling now"
-        Write-Host 
-        Set-OrganizationConfig -OAuth2ClientProfileEnabled $true
-        Write-Host 
-        Write-Host -ForegroundColor $MessageColor "Modern Authentication is now enabled"
-    }
-
-
-    ## Delete all devices not contacted system in set number of days
-    if ($confirmDeletion -eq $true) {
-
-        $deletionTreshold = (Get-Date).AddDays(-$deletionTresholdDays)
-        $allDevices = Get-AzureADDevice -All:$true | Where-Object { $_.ApproximateLastLogonTimeStamp -le $deletionTreshold }
-
-        $exportPath = $(Join-Path $PSScriptRoot "AzureADDeviceExport_$DefaultDomain $(Get-Date -f yyyy-MM-dd).csv")
-        $allDevices | Select-Object -Property DisplayName, ObjectId, ApproximateLastLogonTimeStamp, DeviceOSType, DeviceOSVersion, IsCompliant, IsManaged `
-        | Export-Csv -Path $exportPath -UseCulture -NoTypeInformation
-
-        $allDevices | ForEach-Object {
-            Write-Output "Removing device $($PSItem.ObjectId)"
-            Remove-AzureADDevice -ObjectId $PSItem.ObjectId
-        }    
-
-        Write-Output "Find report with all deleted devices under: $exportPath"
-        Write-Host
-        Write-Host
-
-
-        ## Allow Admin to Access all Mailboxes in Tenant
-        if ($addAdminToMailboxes -eq $true) {
-            Write-Host -ForegroundColor $AssessmentColor ""
-            Get-Mailbox -ResultSize unlimited -Filter { (RecipientTypeDetails -eq 'UserMailbox') -and (Alias -ne 'Admin') } | Add-MailboxPermission -User $GlobalAdmin -AutoMapping:$false -AccessRights fullaccess -InheritanceType all
-            Get-Mailbox -ResultSize unlimited -Filter { (RecipientTypeDetails -eq 'UserMailbox') -and (Alias -ne 'Admin') } | Add-MailboxPermission -User $BreakGlassAccountUPN -AutoMapping:$false -AccessRights fullaccess -InheritanceType all
-            Write-Host
-            Write-Host -ForegroundColor $MessageColor "Access to all mailboxes has been granted to the Global Admin account supplied"
-            Write-Host
+        # Create Break-Glass Account
+        $breakGlassUPN = "$($Config.MSPName)BG@$((Get-AzureADTenantDetail).VerifiedDomains[0].Name)"
+        if (!(Get-AzureADUser -Filter "UserPrincipalName eq '$breakGlassUPN'")) {
+            Write-Log "Creating Break-Glass account" "INFO"
+            $PasswordProfile = New-Object -TypeName Microsoft.Open.AzureAD.Model.PasswordProfile
+            $PasswordProfile.Password = $Config.BreakGlassAccountPass
+            New-AzureADUser -AccountEnabled $True -DisplayName "$($Config.MSPName) Break-Glass" -PasswordProfile $PasswordProfile -MailNickName "$($Config.MSPName)BG" -UserPrincipalName $breakGlassUPN
+            $bgUser = Get-AzureADUser -ObjectId $breakGlassUPN
+            $role = Get-AzureADDirectoryRole | Where-Object { $_.displayName -eq 'Global Administrator' }
+            Add-AzureADDirectoryRoleMember -ObjectId $role.ObjectId -RefObjectId $bgUser.ObjectId
+            Write-Log "Break-Glass account created and added to Global Administrator role" "INFO"
         }
         else {
-            Write-Output "Skipping add admin to all mailboxes..."
+            Write-Log "Break-Glass account already exists" "INFO"
         }
 
-
-        ## Set Time and language on all mailboxes to Set Timezone and English-USA
-        Write-Host -ForegroundColor $AssessmentColor "Configuring Date/Time and Locale settings for each mailbox"
-        Write-Host -ForegroundColor $MessageColor "The script may hang at this step for a while. Do not interrupt or close it."
-
-
-        Get-Mailbox -ResultSize unlimited | ForEach-Object {
-            Set-MailboxRegionalConfiguration -Identity $PsItem.alias -Language $language -TimeZone $timezone
+        # Ensure admin users are properly defined
+        $adminUsers = @($Config.GlobalAdminUPN, $breakGlassUPN) | Where-Object { $_ -ne $null -and $_ -ne '' }
+        if ($adminUsers.Count -eq 0) {
+            Write-Log "No valid admin users defined. Check GlobalAdminUPN and breakGlassUPN in the configuration." "ERROR"
+            throw "No valid admin users defined"
         }
-            
-        Write-Host
-        Write-Host -ForegroundColor $MessageColor "Time, Date and Locale configured for each mailbox"
 
+        # Delete old devices if configured
+        if ($Config.DeleteStaleDevices) {
+            Write-Log "Deleting stale devices" "INFO"
+            $deletionThreshold = (Get-Date).AddDays(-$Config.StaleDeviceThresholdDays)
+            $oldDevices = Get-AzureADDevice -All:$true | Where-Object { $_.ApproximateLastLogonTimeStamp -le $deletionThreshold }
+            foreach ($device in $oldDevices) {
+                Remove-AzureADDevice -ObjectId $device.ObjectId
+                Write-Log "Removed old device: $($device.DisplayName)" "INFO"
+            }
+        }
 
-        ## Disable Group Creation unless User is member of 'Group Creators' Group
+        # Function to check if a group exists in Azure AD
+        function Get-AzureADGroupIfExists {
+            param ($GroupName)
+            try {
+                return Get-AzureADGroup -SearchString $GroupName -ErrorAction Stop
+            }
+            catch {
+                return $null
+            }
+        }
 
-        $AllowGroupCreation = $False
-            
-        Write-Host -ForegroundColor $AssessmentColor "Configuring Group for those allowed to create O365 Groups"
+        # Function to check if a distribution group exists in Exchange Online
+        function Get-DistributionGroupIfExists {
+            param ($GroupName)
+            try {
+                return Get-DistributionGroup -Identity $GroupName -ErrorAction Stop
+            }
+            catch {
+                return $null
+            }
+        }
 
-        $settingsObjectID = (Get-AzureADDirectorySetting | Where-Object -Property Displayname -Value "Group.Unified" -EQ).id
+        # Function to check if a user is a member of an Azure AD group
+        function Test-AzureADGroupMembership {
+            param ($GroupId, $UserId)
+            try {
+                $groupMembers = Get-AzureADGroupMember -ObjectId $GroupId -All $true
+                return ($groupMembers | Where-Object { $_.ObjectId -eq $UserId }).Count -gt 0
+            }
+            catch {
+                Write-Log "Error checking Azure AD group membership: $($_.Exception.Message)" "ERROR"
+                return $false
+            }
+        }
+
+        # Function to check if a user is a member of a distribution group
+        function Test-DistributionGroupMembership {
+            param ($GroupName, $UserEmail)
+            try {
+                $groupMembers = Get-DistributionGroupMember -Identity $GroupName -ResultSize Unlimited
+                return ($groupMembers | Where-Object { $_.PrimarySmtpAddress -eq $UserEmail }).Count -gt 0
+            }
+            catch {
+                Write-Log "Error checking distribution group membership: $($_.Exception.Message)" "ERROR"
+                return $false
+            }
+        }
+
+        # Function to handle mail-enabled security group creation or sync
+        function Sync-MailEnabledSecurityGroup {
+            param (
+                [string]$GroupName,
+                [string]$GroupDescription
+            )
+
+            $azureADGroup = Get-AzureADGroup -SearchString $GroupName -ErrorAction SilentlyContinue
+            $exchangeGroup = Get-DistributionGroup -Identity $GroupName -ErrorAction SilentlyContinue
+
+            if ($azureADGroup -and !$exchangeGroup) {
+                Write-Log "Group $GroupName exists in Azure AD but not in Exchange. Attempting to sync..." "WARNING"
+                try {
+                    $groupEmail = "$GroupName@$((Get-AzureADTenantDetail).VerifiedDomains[0].Name)"
+                    Enable-DistributionGroup -Identity $azureADGroup.ObjectId -PrimarySmtpAddress $groupEmail
+                    Set-DistributionGroup -Identity $GroupName -Type "Security" -MemberJoinRestriction "Closed" -Notes $GroupDescription
+                    Write-Log "Successfully synced $GroupName to Exchange" "INFO"
+                }
+                catch {
+                    Write-Log "Failed to sync $GroupName to Exchange: $($_.Exception.Message)" "ERROR"
+                }
+            }
+            elseif (!$azureADGroup -and !$exchangeGroup) {
+                try {
+                    $groupEmail = "$GroupName@$((Get-AzureADTenantDetail).VerifiedDomains[0].Name)"
+                    New-DistributionGroup -Name $GroupName -DisplayName $GroupName -PrimarySmtpAddress $groupEmail -Type "Security" -MemberJoinRestriction "Closed" -Notes $GroupDescription
+                    Write-Log "Created new mail-enabled security group: $GroupName" "INFO"
+                }
+                catch {
+                    Write-Log "Error creating mail-enabled security group $GroupName : $($_.Exception.Message)" "ERROR"
+                }
+            }
+            else {
+                Write-Log "Mail-enabled security group $GroupName already exists" "INFO"
+            }
+        }
+
+        # Create and Configure Groups
+        Write-Log "Creating and configuring groups" "INFO"
+        $nonMailGroups = @(
+            @{Name = $Config.ExcludeFromCAGroupName; Description = "Users Excluded from any Conditional Access Policies" },
+            @{Name = $Config.GroupCreatorsGroupName; Description = "Users Allowed to create M365 and Teams Groups" },
+            @{Name = $Config.DevicePilotGroupName; Description = "Intune Device Pilot Group for Testing and Deployment" }
+        )
+
+        $MailGroups = @(
+            @{Name = $Config.AllowedAutoForwardingGroup; Description = "Users Allowed to set Auto-Forwarding Rules in Exchange Online" }
+        )
+
+        foreach ($group in $nonMailGroups) {
+            $existingGroup = Get-AzureADGroupIfExists -GroupName $group.Name
+            if (!$existingGroup) {
+                New-AzureADGroup -DisplayName $group.Name -MailEnabled $false -SecurityEnabled $true -MailNickName "NotSet" -Description $group.Description
+                Write-Log "Created new group: $($group.Name)" "INFO"
+            }
+            else {
+                Write-Log "Group already exists: $($group.Name)" "INFO"
+            }
+        }
+
+        foreach ($group in $MailGroups) {
+            Sync-MailEnabledSecurityGroup -GroupName $group.Name -GroupDescription $group.Description
+            $existingGroup = Get-DistributionGroup -Identity $group.Name -ErrorAction SilentlyContinue
+            if (!$existingGroup) {
+                try {
+                    $groupEmail = "$($group.Name)@$((Get-AzureADTenantDetail).VerifiedDomains[0].Name)"
+                    New-DistributionGroup -Name $group.Name -DisplayName $group.Name -PrimarySmtpAddress $groupEmail -Type "Security" -MemberJoinRestriction "Closed" -Notes $group.Description
+                    Write-Log "Created new mail-enabled security group: $($group.Name)" "INFO"
+                }
+                catch {
+                    Write-Log "Error creating mail-enabled security group $($group.Name): $($_.Exception.Message)" "ERROR"
+                }
+            }
+            else {
+                Write-Log "Mail-enabled security group already exists: $($group.Name)" "INFO"
+            }
+        }
+
+        # Add Admin Users to Groups
+        Write-Log "Adding admin users to groups" "INFO"
+        foreach ($user in $adminUsers) {
+            $azureADUser = Get-AzureADUser -ObjectId $user
+
+            foreach ($group in $nonMailGroups) {
+                $groupObject = Get-AzureADGroupIfExists -GroupName $group.Name
+                if ($groupObject) {
+                    if (!(Test-AzureADGroupMembership -GroupId $groupObject.ObjectId -UserId $azureADUser.ObjectId)) {
+                        try {
+                            Add-AzureADGroupMember -ObjectId $groupObject.ObjectId -RefObjectId $azureADUser.ObjectId -ErrorAction Stop
+                            Write-Log "Added $user to group $($group.Name)" "INFO"
+                        }
+                        catch {
+                            Write-Log "Error adding $user to group $($group.Name): $($_.Exception.Message)" "ERROR"
+                        }
+                    }
+                    else {
+                        Write-Log "$user is already a member of $($group.Name)" "INFO"
+                    }
+                }
+                else {
+                    Write-Log "Group $($group.Name) not found" "WARNING"
+                }
+            }
+        }
+
+        # Create or Update Super Admin Role Group
+        function Get-AvailableRoles {
+            $allRoles = @(
+                "Audit Logs",
+                "Information Protection Administrator",
+                "Exchange Administrator",
+                "SharePoint Administrator",
+                "Teams Administrator",
+                "Security Administrator"
+            )
+        
+            $availableRoles = @()
+            foreach ($role in $allRoles) {
+                if (Get-ManagementRole -Identity $role -ErrorAction SilentlyContinue) {
+                    $availableRoles += $role
+                }
+            }
+            return $availableRoles
+        }
+
+        $availableRoles = Get-AvailableRoles
+        Write-Log "Available roles: $($availableRoles -join ', ')" "INFO"
+
+        $superAdminGroup = Get-RoleGroup -Identity "Super Admin" -ErrorAction SilentlyContinue
+        if ($superAdminGroup) {
+            Write-Log "Super Admin role group already exists. Updating roles and members." "INFO"
+            Set-RoleGroup -Identity "Super Admin" -Roles $availableRoles
+            foreach ($user in $adminUsers) {
+                if ($user -notin $superAdminGroup.Members) {
+                    Add-RoleGroupMember -Identity "Super Admin" -Member $user
+                    Write-Log "Added $user to Super Admin role group" "INFO"
+                }
+            }
+        }
+        else {
+            New-RoleGroup -Name "Super Admin" -Roles $availableRoles -Members $adminUsers
+            Write-Log "Super Admin role group created with specified permissions and members" "INFO"
+        }
+        Write-Log "Group and role configuration completed" "INFO"        
+
+        # Grant Admin Access to All Mailboxes
+        if ($Config.AdminAccessToMailboxes) {
+            Write-Log "Granting admin access to all mailboxes" "INFO"
+            Get-Mailbox -ResultSize Unlimited | Add-MailboxPermission -User $Config.GlobalAdminUPN -AccessRights FullAccess -InheritanceType All -AutoMapping $false
+            Write-Log "Admin granted access to all mailboxes" "INFO"
+        }
+
+        # Configure group creation restrictions
+        Write-Log "Configuring group creation restrictions" "INFO"
+        $settingsObjectID = (Get-AzureADDirectorySetting | Where-Object -Property DisplayName -Value "Group.Unified" -EQ).id
         if (!$settingsObjectID) {
             $template = Get-AzureADDirectorySettingTemplate | Where-Object { $_.displayname -eq "group.unified" }
             $settingsCopy = $template.CreateDirectorySetting()
             New-AzureADDirectorySetting -DirectorySetting $settingsCopy
-            $settingsObjectID = (Get-AzureADDirectorySetting | Where-Object -Property Displayname -Value "Group.Unified" -EQ).id
+            $settingsObjectID = (Get-AzureADDirectorySetting | Where-Object -Property DisplayName -Value "Group.Unified" -EQ).id
         }
-
         $settingsCopy = Get-AzureADDirectorySetting -Id $settingsObjectID
-        $settingsCopy["EnableGroupCreation"] = $AllowGroupCreation
-
-        if ($GroupName) {
-            $settingsCopy["GroupCreationAllowedGroupId"] = (Get-AzureADGroup -SearchString $GroupName).objectid
+        $settingsCopy["EnableGroupCreation"] = $false
+        $groupCreators = Get-AzureADGroup -SearchString $Config.GroupCreatorsGroupName
+        if ($groupCreators) {
+            $settingsCopy["GroupCreationAllowedGroupId"] = $groupCreators.ObjectId
+            Set-AzureADDirectorySetting -Id $settingsObjectID -DirectorySetting $settingsCopy
+            Write-Log "Group creation restricted to members of $($Config.GroupCreatorsGroupName)" "INFO"
         }
         else {
-            $settingsCopy["GroupCreationAllowedGroupId"] = $GroupName
-        }
-
-        Set-AzureADDirectorySetting -Id $settingsObjectID -DirectorySetting $settingsCopy
-
-            (Get-AzureADDirectorySetting -Id $settingsObjectID).Values
-            
-        Write-Host -ForegroundColor $MessageColor "Only members of the 'Group Creators' group will be able to create groups within the Tenant"
-        Write-Host
-        Write-Host
-
-
-        ## Block Consumer Storage in OWA
-        $OwaPolicy = Get-OwaMailboxPolicy -Identity OwaMailboxPolicy-Default
-        if ($OwaPolicy.AdditionalStorageProvidersAvailable) {
-            Write-Host 
-            Write-Host -ForegroundColor $AssessmentColor "Connecting consumer storage locations like GoogleDrive and OneDrive (personal) are currently enabled by the default OWA policy"
-            Write-Host 
-            Get-OwaMailboxPolicy | Set-OwaMailboxPolicy -AdditionalStorageProvidersAvailable $False
-            Write-Host 
-            Write-Host -ForegroundColor $MessageColor "Consumer storage locations like GoogleDrive and OneDrive (personal) are now disabled"
-            Write-Host
-            Write-Host
-        }
-        Else {
-            Write-Host
-            Write-Host
-            Write-Host -ForegroundColor $MessageColor "Consumer storage locations like GoogleDrive and OneDrive (personal) are already disabled"
-            Write-Host
-            Write-Host
+            Write-Log "Group Creators group not found. Skipping group creation restriction." "WARNING"
         }
 
 
-        ## Disable Shared Mailbox Logon
-        $SharedMailboxes = Get-Mailbox -RecipientTypeDetails SharedMailbox
-        Foreach ($user in $SharedMailboxes) {
-            Set-MsolUser -UserPrincipalName $user.UserPrincipalName -BlockCredential $true 
-        }
-        Write-Host -ForegroundColor $MessageColor "Shared Mailboxes will be blocked from interactive logon"
-        Write-Host
-        Write-Host
-     
 
-        ## Block Attachment Download on Unmanaged Assets OWA
-        $OwaPolicy = Get-OwaMailboxPolicy -Identity OwaMailboxPolicy-Default
-        if ($OwaPolicy.ConditionalAccessPolicy -eq 'Off') {
-            Write-Host 
-            Write-Host -ForegroundColor $AssessmentColor "Attachment download is currently enabled for unmanaged devices by the default OWA policy"
-            Write-Host 
-            Get-OwaMailboxPolicy | Set-OwaMailboxPolicy -ConditionalAccessPolicy ReadOnly
-            Write-Host 
-            Write-Host -ForegroundColor $MessageColor "Attachment download on unmanaged devices is now disabled"
-            Write-Host
-            Write-Host
-        }
-        Else {
-            Write-Host
-            Write-Host -ForegroundColor $MessageColor "Attachment download on unmanaged devices is already disabled"
-            Write-Host
-            Write-Host
-        }
-
-
-        ## Set Retention Limit on deleted items
-        Write-Host -ForegroundColor $AssessmentColor "Current retention limit (in days and number of mailboxes):"
-        $CurrentRetention | Group-Object | Select-Object name, count | Format-Table
-
-        Get-Mailbox -ResultSize Unlimited | Set-Mailbox -RetainDeletedItemsFor 30
-        Get-MailboxPlan | Set-MailboxPlan -RetainDeletedItemsFor 30
-        Write-Host 
-        Write-Host -ForegroundColor $MessageColor "Deleted items will be retained for the maximum of 30 days for all mailboxes"
-        Write-Host
-        Write-Host
-
-
-        ## Enable Unified Audit Log Search
-        Write-Host
-        Write-Host -ForegroundColor $AssessmentColor "Enabling Unified Audit Log"
-        Write-Host
-        $AuditLogConfig = Get-AdminAuditLogConfig
-        if ($AuditLogConfig.UnifiedAuditLogIngestionEnabled) {
-            Write-Host 
-            Write-Host -ForegroundColor $MessageColor "Unified Audit Log Search is already enabled"
-            Write-Host
-            Write-Host
-        }
-        else {
-            Set-AdminAuditLogConfig -UnifiedAuditLogIngestionEnabled $true
-            Write-Host 
-            Write-Host -ForegroundColor $MessageColor "Unified Audit Log Search is now enabled"
-            Write-Host
-            Write-Host
-        }
-
-
-        ## Configure the audit log retention limit on all mailboxes
-
-        Write-Host
-        Write-Host -ForegroundColor $AssessmentColor "Configuring Audit Log Retention"
-        Set-OrganizationConfig -AuditDisabled $False
-        Write-Host
-       
-        if ($null -eq $AuditLogAgeLimit -or $AuditLogAgeLimit -eq "" -or $AuditLogAgeLimit -eq 'n' -or $AuditLogAgeLimit -eq 'no') {
-            Write-Host
-            Write-Host -ForegroundColor $MessageColor "The audit log age limit is already enabled"
-        }
-        else {
-            Get-Mailbox -ResultSize Unlimited | Set-Mailbox -AuditEnabled $true -AuditLogAgeLimit $AuditLogAgeLimit
-            Write-Host 
-            Write-Host -ForegroundColor $MessageColor "The new audit log age limit has been set for all mailboxes"
-            Write-Host
-            Write-Host
-            ## Enable all mailbox auditing actions
-            Get-Mailbox -ResultSize Unlimited | Set-Mailbox -AuditAdmin @{Add = "Copy", "Create", "FolderBind", "HardDelete", "MessageBind", "Move", "MoveToDeletedItems", "SendAs", "SendOnBehalf", "SoftDelete", "Update", "UpdateFolderPermissions", "UpdateInboxRules", "UpdateCalendarDelegation" }
-            Get-Mailbox -ResultSize Unlimited | Set-Mailbox -AuditDelegate @{Add = "Create", "FolderBind", "HardDelete", "Move", "MoveToDeletedItems", "SendAs", "SendOnBehalf", "SoftDelete", "Update", "UpdateFolderPermissions", "UpdateInboxRules" }
-            Get-Mailbox -ResultSize Unlimited | Set-Mailbox -AuditOwner @{Add = "Create", "HardDelete", "Move", "Mailboxlogin", "MoveToDeletedItems", "SoftDelete", "Update", "UpdateFolderPermissions", "UpdateInboxRules", "UpdateCalendarDelegation" }
-            Write-Host 
-            Write-Host -ForegroundColor $MessageColor "All auditing actions are now enabled on all mailboxes"
-            Write-Host
-            Write-Host
-        }  
-        
-
-
-        ## Set up Archive Mailbox and Legal Hold for all available users (Must have Proper Licensing from Microsoft)
-
-        $Answer = Read-Host "Do you want to configure Archiving and Litigation Hold features? (Recommended)"
-        if ($Answer -eq 'y' -or $Answer -eq 'yes') {
-
-            ## Check whether the auto-expanding archive feature is enabled, and if not, enable it
-            $OrgConfig = Get-OrganizationConfig 
-            if ($OrgConfig.AutoExpandingArchiveEnabled) {
-                Write-Host 
-                Write-Host -ForegroundColor $MessageColor "The Auto Expanding Archive feature is already enabled"
-                Write-Host
-                Write-Host
-            }
-            else {
-                Set-OrganizationConfig -AutoExpandingArchive
-                Write-Host 
-                Write-Host -ForegroundColor $MessageColor "The Auto Expanding Archive feature is now enabled"
-                Write-Host
-                Write-Host
-            }
-
-            ## Prompt whether or not to enable the Archive mailbox for all users
-            Write-Host 
-            $ArchiveAnswer = Read-Host "Do you want to enable the Archive mailbox for all user mailboxes? Y or N (Recommended)"
-            if ($ArchiveAnswer -eq 'y' -or $ArchiveAnswer -eq 'yes') {
-                Get-Mailbox -ResultSize Unlimited -Filter { ArchiveStatus -Eq "None" -AND RecipientTypeDetails -eq "UserMailbox" } | Enable-Mailbox -Archive
-                Write-Host 
-                Write-Host -ForegroundColor $MessageColor "The Archive mailbox has been enabled for all user mailboxes"
-                Write-Host
-                Write-Host
-            }
-            Else {
-                Write-Host 
-                Write-Host -ForegroundColor $AssessmentColor "The Archive mailbox will not be enabled for all user mailboxes"
-                Write-Host
-                Write-Host
-            }
-
-            ## Prompt whether or not to enable Litigation Hold for all mailboxes
-            Write-Host 
-            $LegalHoldAnswer = Read-Host "Do you want to enable Litigation Hold for all mailboxes? Type Y or N and press Enter to continue. NOTE: Requires Exchange Online Plan 2. You can hit Y and ligitation will be attempted to be enabled, but the process might fail because ExoPlan2 is not available. This is non-destructve and you can continue/restart the script."
-            if ($LegalHoldAnswer -eq 'y' -or $LegalHoldAnswer -eq 'yes') {
-                Get-Mailbox -ResultSize Unlimited -Filter { LitigationHoldEnabled -Eq "False" -AND RecipientTypeDetails -ne "DiscoveryMailbox" } | Set-Mailbox -LitigationHoldEnabled $True
-                Write-Host 
-                Write-Host -ForegroundColor $MessageColor "Litigation Hold has been enabled for all mailboxes"
-                Write-Host
-                Write-Host
-            }
-            Else {
-                Write-Host 
-                Write-Host -ForegroundColor $AssessmentColor "Litigation Hold will not be enabled for all mailboxes"
-                Write-Host
-                Write-Host
-            }
-
-        }
-        Else {
-            Write-Host
-            Write-Host -ForegroundColor $AssessmentColor "Archiving and Litigation Hold will not be configured"
-            Write-Host
-            Write-Host
-        }
-
-        # Terminate any existing management sessions
-        #   Get-PSSession | Remove-PSSession
-
-        Write-Host -ForegroundColor $MessageColor "This concludes the script for Baseline Tenant Configs"
-
+        Write-Log "Azure AD configuration completed successfully" "INFO"
+    }
+    catch {
+        Write-Log "Error configuring Azure AD: $($_.Exception.Message)" "ERROR"
+        Write-Log "Error details: $($_.Exception.StackTrace)" "ERROR"
+        throw
     }
 }
 
+# Function to configure MSOL settings
+function Set-MSOLConfig {
+    param ($Config)
     
+    try {
+        # Disable Shared Mailbox Logon
+        Get-Mailbox -RecipientTypeDetails SharedMailbox | ForEach-Object {
+            Set-MsolUser -UserPrincipalName $_.UserPrincipalName -BlockCredential $true
+        }
+        Write-Log "Shared Mailboxes blocked from interactive logon" "INFO"
+
+        # Set regional settings for all mailboxes
+        Get-Mailbox -ResultSize unlimited | ForEach-Object {
+            Set-MailboxRegionalConfiguration -Identity $_.Alias -Language $Config.Language -TimeZone $Config.Timezone
+        }
+        Write-Log "Regional settings configured for all mailboxes" "INFO"
+
+    }
+    catch {
+        Write-Log "Error configuring MSOL: $($_.Exception.Message)" "ERROR"
+        throw
+    }
+}
+
+# Microsoft Teams configurations
+# Update the Teams configuration function
+function Set-TeamsConfiguration {
+    param ($Config)
+    try {
+        Write-Log "Checking Teams connection" "INFO"
+        $teamsConnection = Get-CsTenantFederationConfiguration -ErrorAction Stop
+        
+        Write-Log "Configuring Microsoft Teams settings" "INFO"
+        
+        # Set default team and channel settings
+        Set-CsTeamsChannelsPolicy -Identity Global -AllowOrgWideTeamCreation $false
+
+        # Configure external access
+        Set-CsTenantFederationConfiguration -AllowFederatedUsers $true -AllowTeamsConsumer $false -AllowTeamsConsumerInbound $false
+
+        # Configure guest access
+        Set-CsTeamsClientConfiguration -Identity Global -AllowGuestUser $true
+        Set-CsTeamsMeetingConfiguration -Identity Global -AllowAnonymousUsersToJoinMeeting $false
+
+        Write-Log "Microsoft Teams configuration completed" "INFO"
+    }
+    catch {
+        if ($_.Exception.Message -like "*Session is not established*") {
+            Write-Log "Teams connection not established. Please ensure you've run Connect-MicrosoftTeams before running this function." "ERROR"
+        }
+        else {
+            Write-Log "Error configuring Microsoft Teams: $($_.Exception.Message)" "ERROR"
+        }
+        throw
+    }
+}
+
+# SharePoint and OneDrive configurations
+function Set-SharePointOneDriveConfig {
+    param ($Config)
+    try {
+        Write-Log "Configuring SharePoint and OneDrive settings" "INFO"
+
+        # Set default storage limits
+        Set-SPOTenant -OneDriveStorageQuota 1048576 -OneDriveForBusinessNewUserQuota 1048576
+
+        # Configure external sharing settings
+        Set-SPOTenant -SharingCapability ExternalUserAndGuestSharing -DefaultSharingLinkType Internal
+        Set-SPOSite -Identity $Config.RootSharePointURL -SharingCapability ExternalUserAndGuestSharing
+
+        Write-Log "SharePoint and OneDrive configuration completed" "INFO"
+    }
+    catch {
+        Write-Log "Error configuring SharePoint and OneDrive: $($_.Exception.Message)" "ERROR"
+        throw
+    }
+}
+
+# Configure basic compliance policies
+function Set-CompliancePolicies {
+    param ($Config)
+    try {
+        Write-Log "Configuring basic compliance policies" "INFO"
+
+        # Set up retention policy for email
+        New-RetentionCompliancePolicy -Name "Email 7 Year Retention" -ExchangeLocation All
+        New-RetentionComplianceRule -Name "Email 7 Year Retention Rule" -Policy "Email 7 Year Retention" -RetentionDuration 2555 -RetentionComplianceAction Keep
+
+        # Set up retention policy for SharePoint and OneDrive
+        New-RetentionCompliancePolicy -Name "SharePoint and OneDrive 7 Year Retention" -SharePointLocation All -OneDriveLocation All
+        New-RetentionComplianceRule -Name "SP/OD 7 Year Retention Rule" -Policy "SharePoint and OneDrive 7 Year Retention" -RetentionDuration 2555 -RetentionComplianceAction Keep
+
+        Write-Log "Basic compliance policies configuration completed" "INFO"
+    }
+    catch {
+        Write-Log "Error configuring compliance policies: $($_.Exception.Message)" "ERROR"
+        throw
+    }
+}
+
+# Enhanced Security Alert Notifications
+function Set-SecurityAlertNotifications {
+    param ($Config)
+    try {
+        Write-Log "Configuring enhanced security alert notifications" "INFO"
+
+        $notificationEmail = $Config.GlobalAdminUPN
+
+        # Function to create a new alert policy
+        function New-AlertPolicy {
+            param($Name, $Category, $NotifyUser, $Operation, $Severity, $ThreatType, $Description)
+            New-ProtectionAlert -Name $Name `
+                -Category $Category `
+                -NotifyUser $NotifyUser `
+                -ThreatType $ThreatType `
+                -Operation $Operation `
+                -Severity $Severity `
+                -AggregationType None `
+                -Description $Description
+            Write-Log "Created alert policy: $Name" "INFO"
+        }
+
+        # Admin Activities Alerts
+        New-AlertPolicy -Name "Suspicious Admin Activity" -Category ThreatManagement -NotifyUser $notificationEmail `
+            -Operation "AdminActivity" -Severity "High" -ThreatType "Activity" `
+            -Description "Alerts when suspicious admin activities are detected"
+
+        New-AlertPolicy -Name "Mass User Deletion" -Category ThreatManagement -NotifyUser $notificationEmail `
+            -Operation "RemoveUserFromDirectory" -Severity "High" -ThreatType "Activity" `
+            -Description "Alerts when a large number of users are deleted in a short time"
+
+        # Malware Alerts
+        New-AlertPolicy -Name "Malware Campaign Detected" -Category ThreatManagement -NotifyUser $notificationEmail `
+            -ThreatType "Malware" -Severity "High" -Operation "General" `
+            -Description "Alerts when a malware campaign is detected in the organization"
+
+        # Threat Policies Alerts
+        New-AlertPolicy -Name "Suspicious Email Sending Patterns" -Category ThreatManagement -NotifyUser $notificationEmail `
+            -ThreatType "Activity" -Operation "MailItemsAccessed" -Severity "Medium" `
+            -Description "Alerts when unusual email sending patterns are detected"
+
+        New-AlertPolicy -Name "Suspicious File Activity" -Category ThreatManagement -NotifyUser $notificationEmail `
+            -ThreatType "Activity" -Operation "FileAccessed" -Severity "Medium" `
+            -Description "Alerts when suspicious file access activities are detected"
+
+        # High Sensitivity Alerts
+        New-AlertPolicy -Name "Sensitive Data Access" -Category DataLossPrevention -NotifyUser $notificationEmail `
+            -ThreatType "Activity" -Operation "SensitiveFileAccessed" -Severity "High" `
+            -Description "Alerts when sensitive data is accessed by unauthorized users"
+
+        New-AlertPolicy -Name "Multiple Failed Login Attempts" -Category ThreatManagement -NotifyUser $notificationEmail `
+            -ThreatType "Activity" -Operation "UserLoggedIn" -Severity "High" `
+            -Description "Alerts when multiple failed login attempts are detected for a user"
+
+        # Basic Informational Alerts
+        New-AlertPolicy -Name "New Device Enrolled" -Category InformationalEvents -NotifyUser $notificationEmail `
+            -ThreatType "Activity" -Operation "DeviceEnrollment" -Severity "Low" `
+            -Description "Informs when a new device is enrolled in Intune"
+
+        New-AlertPolicy -Name "User Added to Admin Role" -Category InformationalEvents -NotifyUser $notificationEmail `
+            -ThreatType "Activity" -Operation "UserAdded" -Severity "Medium" `
+            -Description "Informs when a user is added to an admin role"
+
+        New-AlertPolicy -Name "New Mailbox Created" -Category InformationalEvents -NotifyUser $notificationEmail `
+            -ThreatType "Activity" -Operation "MailboxCreated" -Severity "Low" `
+            -Description "Informs when a new mailbox is created"
+
+        Write-Log "Security alert notifications configuration completed" "INFO"
+    }
+    catch {
+        Write-Log "Error configuring security alert notifications: $($_.Exception.Message)" "ERROR"
+        throw
+    }
+}
+
+######################################################
+### Main execution
+######################################################
+
+try {
+    Write-Log "Starting Comprehensive M365 Tenant and Exchange Configuration" "INFO"
+    
+    Check-Prerequisites
+    Verify-ServiceConnections
+    $config = Load-Configuration
+
+    Set-ExchangeOnlineConfig -Config $config
+    Set-AzureADConfig -Config $config
+    Set-MSOLConfig -Config $config
+
+    Set-TeamsConfiguration -Config $config
+    Set-SharePointOneDriveConfig -Config $config
+    Set-CompliancePolicies -Config $config
+    Set-SecurityAlertNotifications -Config $config
+
+    Write-Log "Configuration completed successfully" "INFO"
+
+    # Configure Archive and Litigation Hold if requested
+    $Answer = Read-Host "Do you want to configure Archiving and Litigation Hold features? (Y/N) (Recommended)"
+    if ($Answer -eq 'y' -or $Answer -eq 'yes') {
+        # Enable Auto-Expanding Archive
+        if (!(Get-OrganizationConfig).AutoExpandingArchiveEnabled) {
+            Set-OrganizationConfig -AutoExpandingArchive
+            Write-Log "Auto-Expanding Archive feature is now enabled" "INFO"
+        }
+
+        # Enable Archive Mailbox for all users
+        $ArchiveAnswer = Read-Host "Do you want to enable the Archive mailbox for all user mailboxes? (Y/N) (Recommended)"
+        if ($ArchiveAnswer -eq 'y' -or $ArchiveAnswer -eq 'yes') {
+            Get-Mailbox -ResultSize Unlimited -Filter { ArchiveStatus -Eq "None" -AND RecipientTypeDetails -eq "UserMailbox" } | Enable-Mailbox -Archive
+            Write-Log "Archive mailbox enabled for all user mailboxes" "INFO"
+        }
+
+        # Enable Litigation Hold
+        $LegalHoldAnswer = Read-Host "Do you want to enable Litigation Hold for all mailboxes? (Y/N) (Requires Exchange Online Plan 2)"
+        if ($LegalHoldAnswer -eq 'y' -or $LegalHoldAnswer -eq 'yes') {
+            Get-Mailbox -ResultSize Unlimited -Filter { LitigationHoldEnabled -Eq "False" -AND RecipientTypeDetails -ne "DiscoveryMailbox" } | Set-Mailbox -LitigationHoldEnabled $True
+            Write-Log "Litigation Hold enabled for all eligible mailboxes" "INFO"
+        }
+    }
+
+    Write-Log "All Configuration changes completed successfully" "INFO"
+}
+catch {
+    Write-Log "An error occurred during execution: $($_.Exception.Message)" "ERROR"
+    Write-Log "Error details: $($_.Exception.StackTrace)" "ERROR"
+    Write-Host
+    Write-Host "The script will not continue. Please review the log file for detailed information: $logFile and manually check on script section that failed in your Tenant's Admin Center."
+    Write-Host "This script is safe to run as many times as you want, setting up the tenant as the 'Desired State' based on the parameters and config file."
+    Write-Host "After confirming and fixing any issues, you may run this script again till completion."
+}
+
+Write-Host
+Write-Host " - Press any key to exit - "
+Read-Host

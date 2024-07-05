@@ -35,140 +35,330 @@ function Write-Log {
     Write-Host $logMessage
 }
 
-# Function to install or update a module
+# Update Modules with specific versioning enabled
 function Update-Module {
     param (
         [string]$ModuleName
     )
 
-    Write-Log "Processing module: $ModuleName" "INFO"
-
-    $currentVersion = $null
-    if ($null -ne (Get-InstalledModule -Name $ModuleName -ErrorAction SilentlyContinue)) {
-        $currentVersion = (Get-InstalledModule -Name $ModuleName -AllVersions).Version
-        $rollbackInfo[$ModuleName] = $currentVersion
+    # Ensure the ModuleName is not null or empty
+    if ([string]::IsNullOrEmpty($ModuleName)) {
+        Write-Log "ModuleName is null or empty at the start of Update-Module function" "ERROR"
+        return
     }
 
-    $latestModule = Find-Module -Name $ModuleName
+    # Get all Current Versions
+    $installedModules = Get-InstalledModule -Name $ModuleName -AllVersions -ErrorAction SilentlyContinue
+    $currentVersions = $installedModules.Version -join " "
+    $installedVersions = $installedModules.Version
+
+    # Log the current version
+    Write-Log "Current version(s) of ${ModuleName}: ${currentVersions}" "INFO"
+
+    # Set Required Versions
+    if ($ModuleName -eq "ExchangeOnlineManagement") {
+        $requiredVersion = "3.2.0"
+    }
+    else {
+        $requiredVersion = (Find-Module -Name $ModuleName).Version
+    }
+
+    # Log the required version
+    Write-Log "Required version for ${ModuleName}: ${requiredVersion}" "INFO"
+
+    # Get Latest Versions
+    $CurrentModule = Find-Module -Name $ModuleName -RequiredVersion $requiredVersion
+    if ($null -eq $CurrentModule) {
+        Write-Log "Unable to find module ${ModuleName} with version ${requiredVersion}" "ERROR"
+        return
+    }
 
     $status = "Unknown"
     $version = "N/A"
 
-    if ($null -eq $currentVersion) {
-        Write-Log "$($latestModule.Name) - Installing $ModuleName from PowerShellGallery. Version: $($latestModule.Version). Release date: $($latestModule.PublishedDate)" "INFO"
+    # Function to attempt to close a module in use
+    function Attempt-ForceCloseModule {
+        param (
+            [string]$ModuleName
+        )
+        Write-Log "Attempting to close module ${ModuleName} which is currently in use" "WARNING"
         try {
-            Install-Module -Name $ModuleName -Force -AllowClobber
-            $status = "Installed"
-            $version = $latestModule.Version
+            # Attempt to remove the module forcibly
+            Get-Module -Name $ModuleName -ListAvailable | ForEach-Object {
+                Remove-Module -Name $_.Name -Force -ErrorAction SilentlyContinue
+            }
         }
         catch {
-            Write-Log "Error installing $ModuleName. Details: $($_.Exception.Message)" "ERROR"
+            Write-Log "Failed to forcibly remove module ${ModuleName}. Details: $($_.Exception.Message)" "ERROR"
+        }
+    }
+
+    # Function to verify module version
+    function Verify-ModuleVersion {
+        param (
+            [string]$ModuleName,
+            [string]$ExpectedVersion
+        )
+        $installedVersion = (Get-InstalledModule -Name $ModuleName -ErrorAction SilentlyContinue).Version
+        if ($installedVersion -eq $ExpectedVersion) {
+            return $true
+        }
+        else {
+            return $false
+        }
+    }
+
+    # Ensure only the required version is installed
+    function Ensure-SingleVersion {
+        param (
+            [string]$ModuleName,
+            [string]$TargetVersion
+        )
+        $installedModules = Get-InstalledModule -Name $ModuleName -AllVersions -ErrorAction SilentlyContinue
+        foreach ($module in $installedModules) {
+            if ($module.Version -ne $TargetVersion) {
+                Write-Log "Uninstalling ${ModuleName}" "INFO"
+                try {
+                    Attempt-ForceCloseModule -ModuleName $ModuleName
+                    Uninstall-Module -Name $ModuleName -Force
+                }
+                catch {
+                    Attempt-ForceCloseModule -ModuleName $ModuleName
+                    try {
+                        Uninstall-Module -Name $ModuleName -RequiredVersion $module.Version -Force
+                    }
+                    catch {
+                        Write-Log "Failed to uninstall version ${module.Version} of ${ModuleName}. Details: $($_.Exception.Message)" "ERROR"
+                    }
+                }
+            }
+        }
+    }
+
+    # Main Logic
+    if ($null -eq $currentVersions) {
+        # New Install
+        Write-Log "$($CurrentModule.Name) - Installing ${ModuleName} from PowerShellGallery. Version: $($CurrentModule.Version). Release date: $($CurrentModule.PublishedDate)" "INFO"
+        try {
+            Install-Module -Name $ModuleName -RequiredVersion $requiredVersion -Force -SkipPublisherCheck
+            if (Verify-ModuleVersion -ModuleName $ModuleName -ExpectedVersion $requiredVersion) {
+                $status = "Installed"
+                $version = $CurrentModule.Version
+            }
+            else {
+                $status = "Installation Failed"
+            }
+        }
+        catch {
+            Write-Log "Something went wrong when installing ${ModuleName}. Please uninstall and try re-installing this module. (Remove-Module, Install-Module) Details:" "ERROR"
+            Write-Log "$_.Exception.Message" "ERROR"
             $status = "Installation Failed"
         }
     }
-    elseif ($latestModule.Version -eq $currentVersion) {
-        Write-Log "$($latestModule.Name) is up to date. Version: $currentVersion. Release date: $($latestModule.PublishedDate)" "INFO"
+    elseif ($installedVersions -contains $requiredVersion -and $installedVersions.Count -eq 1) {
+        # Already Installed
+        Write-Log "$($CurrentModule.Name) is installed and ready. Version: (${requiredVersion}). Release date: $($CurrentModule.PublishedDate))" "INFO"
         $status = "Up to Date"
-        $version = $currentVersion
+        $version = $currentVersions
     }
     else {
-        Write-Log "$($latestModule.Name) - Updating from version $currentVersion to $($latestModule.Version). Release date: $($latestModule.PublishedDate)" "INFO"
+        # Multiple Versions or Different Version
+        Write-Warning "${ModuleName} is installed in multiple versions or different version (versions: $($installedVersions -join ' | '))"
+        Write-Log "Uninstalling non-target versions of ${ModuleName}" "INFO"
+        Ensure-SingleVersion -ModuleName $ModuleName -TargetVersion $requiredVersion
+
+        Write-Log "$($CurrentModule.Name) - Installing version from PowerShellGallery $requiredVersion. Release date: $($CurrentModule.PublishedDate)" "INFO"
+
         try {
-            Update-Module -Name $ModuleName -Force -AllowClobber
-            $status = "Updated"
-            $version = $latestModule.Version
+            Install-Module -Name $ModuleName -RequiredVersion $requiredVersion -Force -SkipPublisherCheck
+            if (Verify-ModuleVersion -ModuleName $ModuleName -ExpectedVersion $requiredVersion) {
+                Write-Log "${ModuleName} Successfully Installed" "INFO"
+                $status = "Updated"
+                $version = $requiredVersion
+            }
+            else {
+                $status = "Installation Failed"
+            }
         }
         catch {
-            Write-Log "Error updating $ModuleName. Details: $($_.Exception.Message)" "ERROR"
+            Write-Log "Something went wrong with installing ${ModuleName}. Details:" "ERROR"
+            Write-Log -ForegroundColor red "$_.Exception.Message" "ERROR"
             $status = "Update Failed"
         }
     }
 
-    return [PSCustomObject]@{
+    $modulesSummary += [PSCustomObject]@{
         Module  = $ModuleName
         Status  = $status
         Version = $version
     }
+    return
 }
 
-# Function to rollback module updates
-function Rollback-ModuleUpdates {
-    Write-Log "Starting rollback process" "WARNING"
-    foreach ($module in $rollbackInfo.Keys) {
-        $version = $rollbackInfo[$module]
-        Write-Log "Rolling back $module to version $version" "INFO"
-        try {
-            Uninstall-Module -Name $module -AllVersions -Force
-            Install-Module -Name $module -RequiredVersion $version -Force -AllowClobber
-            Write-Log "Successfully rolled back $module to version $version" "INFO"
-        }
-        catch {
-            Write-Log "Failed to rollback $module. Error: $($_.Exception.Message)" "ERROR"
+# Function to check existing connections
+function Check-ExistingConnections {
+    $connections = @()
+
+    # Check Exchange Online connection
+    try {
+        $exchangeConnection = Get-PSSession | Where-Object { $_.ConfigurationName -eq "Microsoft.Exchange" -and $_.State -eq "Opened" }
+        if ($exchangeConnection) {
+            $tenantInfo = Get-OrganizationConfig
+            $connections += "Exchange Online (Tenant: $($tenantInfo.DisplayName))"
         }
     }
-    Write-Log "Rollback process completed" "WARNING"
+    catch {
+        Write-Host "Error checking Exchange Online connection: $($_.Exception.Message)" "WARNING"
+    }
+
+    # Check Azure AD connection
+    try {
+        $azureADInfo = Get-AzureADTenantDetail -ErrorAction Stop
+        $connections += "Azure AD (Tenant: $($azureADInfo.DisplayName))"
+    }
+    catch {
+        Write-Host "Not connected to Azure AD"
+    }
+
+    # Check MSOnline connection
+    try {
+        $msolCompanyInfo = Get-MsolCompanyInformation -ErrorAction Stop
+        $connections += "MSOnline (Tenant: $($msolCompanyInfo.DisplayName))"
+    }
+    catch {
+        Write-Host "Not connected to MSOnline"
+    }
+
+    # Check Teams connection
+    try {
+        $teamsConnection = Get-CsOnlineUser -ResultSize 1 -ErrorAction Stop
+        $connections += "Microsoft Teams"
+    }
+    catch {
+        Write-Host "Not connected to Microsoft Teams"
+    }
+
+    # Check SharePoint Online connection
+    try {
+        $spoConnection = Get-SPOTenant -ErrorAction Stop
+        $connections += "SharePoint Online"
+    }
+    catch {
+        Write-Host "Not connected to SharePoint Online"
+    }
+
+    # Check MS Graph connection
+    try {
+        $graphConnection = Invoke-GraphRequest -Uri "https://graph.microsoft.com/v1.0/me" -ErrorAction Stop
+        if ($graphConnection) {
+            $connections += "MS Graph"
+        }
+    }
+    catch {
+        Write-Host "Not connected to MS Graph"
+    }
+
+    # Check Microsoft.Graph connection
+    try {
+        $graphInfo = Get-MgOrganization -ErrorAction Stop
+        $connections += "Microsoft.Graph"
+    }
+    catch {
+        Write-Host "Not connected to Microsoft.Graph"
+    }
+
+    # Check AIPService connection
+    try {
+        $aipConnection = Get-AIPServiceConfiguration -ErrorAction Stop
+        $connections += "AIPService"
+    }
+    catch {
+        Write-Host "Not connected to AIPService"
+    }
+
+    return $connections
 }
 
-# List of modules to install/update
-$Modules = @(
-    "ExchangeOnlineManagement", 
-    "MSOnline",
-    "AzureADPreview",
-    "MSGRAPH",
-    "Microsoft.Graph.Intune",
-    "Microsoft.Graph.DeviceManagement",
-    "Microsoft.Graph.Compliance",
-    "Microsoft.Graph.Users",
-    "Microsoft.Graph.Groups",
-    "Microsoft.Graph.Identity.SignIns",
-    "Microsoft.Graph.Authentication",
-    "AIPService"
-)
 
-# Main script logic
-$Answer = Read-Host "Would you like to update/install the required modules? (Y/N)"
-if ($Answer -eq 'Y' -or $Answer -eq 'yes') {
-    Write-Log "Starting module update process" "INFO"
-
-    foreach ($Module in $Modules) {
-        $result = Update-Module -ModuleName $Module
-        $modulesSummary += $result
-    }
-
-    # Display summary
-    Write-Log "Module Installation/Update Summary:" "INFO"
-    $modulesSummary | Format-Table -AutoSize
-
-    # Check for failures and offer rollback
-    $failures = $modulesSummary | Where-Object { $_.Status -like "*Failed" }
-    if ($failures) {
-        Write-Log "Some module updates failed. Would you like to rollback all changes? (Y/N)" "WARNING"
-        $rollbackAnswer = Read-Host
-        if ($rollbackAnswer -eq 'Y' -or $rollbackAnswer -eq 'yes') {
-            Rollback-ModuleUpdates
+# Function to display existing connections and prompt for action
+function Prompt-ExistingConnections {
+    $existingConnections = Check-ExistingConnections
+    if ($existingConnections.Count -gt 0) {
+        Write-Host "The following connections are already established:" -ForegroundColor Yellow
+        $existingConnections | ForEach-Object { Write-Host "- $_" -ForegroundColor Cyan }
+        $action = Read-Host "`nDo you want to disconnect these sessions before proceeding? (Y/N)"
+        if ($action -eq 'Y' -or $action -eq 'y') {
+            Get-PSSession | Remove-PSSession
+            Disconnect-AzureAD -ErrorAction SilentlyContinue
+            Write-Log "Existing connections have been closed." "INFO"
         }
+        else {
+            Write-Log "Proceeding with existing connections. This may affect the module update process." "WARNING"
+        }
+    }
+    else {
+        Write-Log "No existing tenant connections detected." "INFO"
     }
 }
 
-# Module connection
-$Answer = Read-Host "Would you like to connect to the required modules? (Y/N)"
-if ($Answer -eq 'Y' -or $Answer -eq 'yes') {
-    $Cred = Get-Credential
-
-    $connectionModules = @(
-        @{Name = "Exchange Online"; Cmd = { Connect-ExchangeOnline -UserPrincipalName $Cred.Username } },
-        @{Name = "Microsoft Online"; Cmd = { Connect-MsolService } },
-        @{Name = "Azure AD Preview"; Cmd = { Connect-AzureAD } },
-        @{Name = "Azure Information Protection"; Cmd = { Connect-AipService } },
-        @{Name = "Information Protection Service"; Cmd = { Connect-IPPSSession } }
+# Function to connect to all services
+function Connect-AllServices {
+    param (
+        [PSCredential]$Credential
     )
 
+    Write-Host
+    Write-Host "Please be patient as we import modules..."
+    Write-Host
+
+    foreach ($Module in $Modules) {
+        try {
+            Import-Module $Module.Name -Verbose
+            Write-Log "Imported $($Module.Name) module" "INFO"
+        }
+        catch {
+            Write-Log "Unable to import $($Module.Name). Details: $($_.Exception.Message)" "ERROR"
+        }
+        
+    }
+
+    Write-Host
+    Write-Host "Connecting Modules..."
+    Write-Host
+    Write-Host "You will be prompted for authentication for each service. Please complete the MFA process when required." -ForegroundColor Green
+    Write-Host
+
     $connectionSummary = @()
+
+    $connectionModules = @(
+        @{Name = "Exchange Online"; Cmd = { Connect-ExchangeOnline -UserPrincipalName $Credential.UserName } },
+        @{Name = "Security & Compliance Center"; Cmd = { Connect-IPPSSession -UserPrincipalName $Credential.UserName -UseRPSSession:$false } },
+        @{Name = "Microsoft Graph"; Cmd = { 
+                $Scopes = @(
+                    "User.Read.All",
+                    "Group.ReadWrite.All",
+                    "Policy.ReadWrite.ConditionalAccess",
+                    "DeviceManagementServiceConfig.ReadWrite.All",
+                    "SecurityEvents.ReadWrite.All" 
+                )
+                Connect-MgGraph -Scopes $Scopes -UseDeviceAuthentication
+            }
+        },
+        @{Name = "Microsoft Online"; Cmd = { Connect-MsolService } },
+        @{Name = "Azure AD Preview"; Cmd = { Connect-AzureAD } },
+        #@{Name = "Microsoft Teams"; Cmd = { Connect-MicrosoftTeams -Credential $Credential.UserName } },
+        <#@{Name = "SharePoint Online"; Cmd = { 
+                $orgName = $Credential.UserName.Split('@')[1].Split('.')[0]
+                Connect-SPOService -Url "https://$orgName-admin.sharepoint.com" -Credential $Credential.UserName 
+            }
+        },#>
+        @{Name = "Azure Information Protection"; Cmd = { Connect-AipService } }
+    )
 
     foreach ($module in $connectionModules) {
         try {
             & $module.Cmd
-            Write-Host "$($module.Name) Connected!"
+            Write-Host "$($module.Name) Connected!" -ForegroundColor Green
             $connectionSummary += [PSCustomObject]@{
                 Module = $module.Name
                 Status = "Connected"
@@ -184,8 +374,90 @@ if ($Answer -eq 'Y' -or $Answer -eq 'yes') {
         Write-Host
     }
 
+    return $connectionSummary
+}
+
+
+##############################################################################
+### Main script logic
+##############################################################################
+
+Write-Log "Starting M365 Module Updater" "INFO"
+Write-Host
+Write-Host "Please be patient as we check for prerequisites..."
+Write-Host
+
+Prompt-ExistingConnections
+
+Write-Host
+$Answer = Read-Host "Would you like to update/install the required modules? (Y/N)"
+if ($Answer -eq 'Y' -or $Answer -eq 'yes') {
+
+    # List of modules to install/update
+    Write-Host
+    Write-Host "Checking for Installed Modules..."
+    $Modules = @(
+        "ExchangeOnlineManagement",
+        "MSOnline",
+        "AzureADPreview",
+        "MSGRAPH",
+        "Microsoft.Graph",
+        "AIPService",
+        "MicrosoftTeams",
+        "Microsoft.Online.SharePoint.PowerShell"
+    )
+
+    $installedModules = Get-InstalledModule * | Select-Object -ExpandProperty Name
+    $Modules += $installedModules
+    $Modules = $Modules | Sort-Object -Unique
+    Write-Host
+    Write-Host "Installing Required M365 Modules and Updating All Modules..."
+    Write-Host
+
+    foreach ($Module in $Modules) {
+        if (![string]::IsNullOrEmpty($Module)) {
+            Write-Host
+            Write-Log "Processing module: $Module" "INFO"
+            Update-Module -ModuleName $Module
+        }
+        else {
+            Write-Log "Encountered an empty module name in the list, skipping." "WARNING"
+        }
+    }
+    # Display summary
+    Write-Log "Module Installation/Update Summary:" "INFO"
+    $modulesSummary | Format-Table -AutoSize
+
+    Write-Host
+    Write-Host -ForegroundColor Green "Module Updates Complete."
+    Write-Host "Please double check and make there are no errors and you are running Exchange Online Management Module version 3.2.0 and NOT the latest version."
+    Write-Host "You may re-run this as many times as needed until all modules are correctly installed. If you continue seeing errors, restart your PC."
+}
+
+Write-Host
+
+# Module connection
+$Answer = Read-Host "Would you like to connect to all required services? (Y/N)"
+if ($Answer -eq 'Y' -or $Answer -eq 'yes') {
+
+    # Enter Admin Creds
+    try {
+        $Credential = Get-Credential -ErrorAction Stop
+    }
+    catch {
+        Write-Host -ForegroundColor Red "Credentials not entered. Exiting..."
+        exit
+    }
+    Write-Host
+
+    # Begin Connecting
+    $connectionSummary = Connect-AllServices $Credential
+
+    Write-Host
+    Write-Host
+
     # Display connection summary
-    Write-Host "Module Connection Summary:"
+    Write-Host "Service Connection Summary:"
     $connectionSummary | Format-Table -AutoSize
 }
 
