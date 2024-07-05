@@ -98,11 +98,124 @@ function Run-Script {
     }
 }
 
+# Function to check existing connections
+function Check-ExistingConnections {
+    $connections = @()
+
+    # Check Exchange Online connection
+    try {
+        $exchangeConnection = Get-PSSession | Where-Object { $_.ConfigurationName -eq "Microsoft.Exchange" -and $_.State -eq "Opened" }
+        if ($exchangeConnection) {
+            $tenantInfo = Get-OrganizationConfig
+            $connections += "Exchange Online (Tenant: $($tenantInfo.DisplayName))"
+        }
+    }
+    catch {
+        Write-Host "Error checking Exchange Online connection: $($_.Exception.Message)" "WARNING"
+    }
+
+    # Check Azure AD connection
+    try {
+        $azureADInfo = Get-AzureADTenantDetail -ErrorAction Stop
+        $connections += "Azure AD (Tenant: $($azureADInfo.DisplayName))"
+    }
+    catch {
+        Write-Host "Not connected to Azure AD"
+    }
+
+    # Check MSOnline connection
+    try {
+        $msolCompanyInfo = Get-MsolCompanyInformation -ErrorAction Stop
+        $connections += "MSOnline (Tenant: $($msolCompanyInfo.DisplayName))"
+    }
+    catch {
+        Write-Host "Not connected to MSOnline"
+    }
+
+    # Check Teams connection
+    try {
+        $teamsConnection = Get-CsOnlineUser -ResultSize 1 -ErrorAction Stop
+        $connections += "Microsoft Teams"
+    }
+    catch {
+        Write-Host "Not connected to Microsoft Teams"
+    }
+
+    # Check SharePoint Online connection
+    try {
+        $spoConnection = Get-SPOTenant -ErrorAction Stop
+        $connections += "SharePoint Online"
+    }
+    catch {
+        Write-Host "Not connected to SharePoint Online"
+    }
+
+    # Check MS Graph connection
+    try {
+        $graphConnection = Invoke-GraphRequest -Uri "https://graph.microsoft.com/v1.0/me" -ErrorAction Stop
+        if ($graphConnection) {
+            $connections += "MS Graph"
+        }
+    }
+    catch {
+        Write-Host "Not connected to MS Graph"
+    }
+
+    # Check Microsoft.Graph connection
+    try {
+        $graphInfo = Get-MgOrganization -ErrorAction Stop
+        $connections += "Microsoft.Graph"
+    }
+    catch {
+        Write-Host "Not connected to Microsoft.Graph"
+    }
+
+    # Check AIPService connection
+    try {
+        $aipConnection = Get-AIPServiceConfiguration -ErrorAction Stop
+        $connections += "AIPService"
+    }
+    catch {
+        Write-Host "Not connected to AIPService"
+    }
+
+    return $connections
+}
+
+# Function to display existing connections and prompt for action
+function Prompt-ExistingConnections {
+    $existingConnections = Check-ExistingConnections
+    if ($existingConnections.Count -gt 0) {
+        Write-Host "The following connections are already established:" -ForegroundColor Yellow
+        $existingConnections | ForEach-Object { Write-Host "- $_" -ForegroundColor Cyan }
+        $action = Read-Host "`nDo you want to disconnect these sessions before proceeding? (Y/N)"
+        if ($action -eq 'Y' -or $action -eq 'y') {
+            Get-PSSession | Remove-PSSession
+            Disconnect-AzureAD -ErrorAction SilentlyContinue
+            Write-Log "Existing connections have been closed." "INFO"
+        }
+        else {
+            Write-Log "Proceeding with existing connections. This may affect the module update process." "WARNING"
+        }
+    }
+    else {
+        Write-Log "No existing tenant connections detected." "INFO"
+    }
+}
+
+
 # Load configuration
 $config = Load-Configuration
 
 # Main script logic
 do {
+    Write-Host
+    Write-Host
+    Write-Host "Please be patient as we check for connections..."
+    Write-Host
+    Prompt-ExistingConnections
+    Write-Host
+    Write-Host
     Show-Menu
     $input = Read-Host "Please make a selection"
     switch ($input) {
