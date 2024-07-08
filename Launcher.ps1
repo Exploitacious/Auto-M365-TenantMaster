@@ -40,6 +40,9 @@ $Global:Modules = @(
     "Microsoft.Online.SharePoint.PowerShell"
 )
 
+# Max Function Count
+$maximumfunctioncount = 32768
+
 # Function to write log messages
 function Write-Log {
     param (
@@ -99,7 +102,7 @@ function Show-Menu {
     Write-Host "4: Configure ATP (Advanced Threat Protection)"
     Write-Host "5: Configure DLP (Data Loss Prevention)"
     Write-Host "6: Run All Configurations"
-    Write-Host "Q: Consolidate logs and Quit"
+    Write-Host "Q: Consolidate logs, Terminate Connections and Quit"
     Write-Host
 }
 
@@ -214,12 +217,12 @@ function Check-ExistingConnections {
     try {
         $exchangeConnection = Get-PSSession | Where-Object { $_.ConfigurationName -eq "Microsoft.Exchange" -and $_.State -eq "Opened" }
         if ($exchangeConnection) {
-            $tenantInfo = Get-OrganizationConfig
+            $tenantInfo = Get-OrganizationConfig -ErrorAction Stop
             $connections += "Exchange Online (Tenant: $($tenantInfo.DisplayName))"
         }
     }
     catch {
-        Write-Host "Error checking Exchange Online connection: $($_.Exception.Message)" "WARNING"
+        Write-Log "Error checking Exchange Online connection: $($_.Exception.Message)" "WARNING"
     }
 
     # Check Azure AD connection
@@ -228,7 +231,7 @@ function Check-ExistingConnections {
         $connections += "Azure AD (Tenant: $($azureADInfo.DisplayName))"
     }
     catch {
-        Write-Host "Not connected to Azure AD"
+        Write-Log "Not connected to Azure AD" "WARNING"
     }
 
     # Check MSOnline connection
@@ -237,7 +240,7 @@ function Check-ExistingConnections {
         $connections += "MSOnline (Tenant: $($msolCompanyInfo.DisplayName))"
     }
     catch {
-        Write-Host "Not connected to MSOnline"
+        Write-Log "Not connected to MSOnline" "WARNING"
     }
 
     # Check Teams connection
@@ -246,7 +249,7 @@ function Check-ExistingConnections {
         $connections += "Microsoft Teams"
     }
     catch {
-        Write-Host "Not connected to Microsoft Teams"
+        Write-Log "Not connected to Microsoft Teams" "WARNING"
     }
 
     # Check SharePoint Online connection
@@ -255,7 +258,7 @@ function Check-ExistingConnections {
         $connections += "SharePoint Online"
     }
     catch {
-        Write-Host "Not connected to SharePoint Online"
+        Write-Log "Not connected to SharePoint Online" "WARNING"
     }
 
     # Check MS Graph connection
@@ -266,16 +269,16 @@ function Check-ExistingConnections {
         }
     }
     catch {
-        Write-Host "Not connected to MS Graph"
+        Write-Log "Not connected to MS Graph" "WARNING"
     }
 
     # Check Microsoft.Graph connection
     try {
         $graphInfo = Get-MgOrganization -ErrorAction Stop
-        $connections += "Microsoft.Graph"
+        $connections += "Microsoft.Graph (Tenant: $($graphInfo.DisplayName))"
     }
     catch {
-        Write-Host "Not connected to Microsoft.Graph"
+        Write-Log "Not connected to Microsoft.Graph" "WARNING"
     }
 
     # Check AIPService connection
@@ -284,7 +287,7 @@ function Check-ExistingConnections {
         $connections += "AIPService"
     }
     catch {
-        Write-Host "Not connected to AIPService"
+        Write-Log "Not connected to AIPService" "WARNING"
     }
 
     return $connections
@@ -294,20 +297,15 @@ function Check-ExistingConnections {
 function Prompt-ExistingConnections {
     $existingConnections = Check-ExistingConnections
     if ($existingConnections.Count -gt 0) {
+        Write-Host
         Write-Host "Connections Established:" -ForegroundColor Yellow
         $existingConnections | ForEach-Object { Write-Host "- $_" -ForegroundColor Cyan }
-        $action = Read-Host "`nDo you want to disconnect these sessions before proceeding? (Y/N)"
-        if ($action -eq 'Y' -or $action -eq 'y') {
-            Get-PSSession | Remove-PSSession
-            Disconnect-AzureAD -ErrorAction SilentlyContinue
-            Write-Log "Existing connections have been closed." "INFO"
-        }
-        else {
-            Write-Host
-            Write-Log "Proceeding with existing connections." "INFO"
-        }
+        Write-Host
+        Write-Host
+        Write-Log "Proceeding with existing connections." "INFO"
     }
     else {
+        Write-Host
         Write-Host
         Write-Log "No existing tenant connections detected." "INFO"
     }
@@ -356,11 +354,17 @@ do {
             }
         }
         'q' { 
-            Write-Log "Exiting script" "INFO"
+            Write-Log "Exiting script..." "INFO"
 
             # Attempt Combine
             # Combine-LogFiles # Gotta fix this later.
-
+            
+            # Terminating Module Connections
+            Write-Host "Disconnecting all sessions" -ForegroundColor Yellow
+            Get-PSSession | Remove-PSSession -ErrorAction SilentlyContinue
+            Disconnect-AzureAD -ErrorAction SilentlyContinue
+            Write-Log "Existing connections have been closed." "INFO"
+                
             return
         }
     }
