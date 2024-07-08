@@ -195,83 +195,6 @@ function Update-Module {
     return
 }
 
-# Function to connect to all services
-function Connect-AllServices {
-    param (
-        [PSCredential]$Credential
-    )
-
-    Write-Host
-    Write-Host "Please be patient as we import modules..."
-    Write-Host
-
-    foreach ($Module in $Modules) {
-        try {
-            Import-Module $Module.Name -Verbose
-            Write-Log "Imported $($Module.Name) module" "INFO"
-        }
-        catch {
-            Write-Log "Unable to import $($Module.Name). Details: $($_.Exception.Message)" "ERROR"
-        }
-        
-    }
-
-    Write-Host
-    Write-Host "Connecting Modules..."
-    Write-Host
-    Write-Host "You will be prompted for authentication for each service. Please complete the MFA process when required." -ForegroundColor Green
-    Write-Host
-
-    $connectionSummary = @()
-
-    $connectionModules = @(
-        @{Name = "Exchange Online"; Cmd = { Connect-ExchangeOnline -UserPrincipalName $Credential.UserName } },
-        @{Name = "Security & Compliance Center"; Cmd = { Connect-IPPSSession -UserPrincipalName $Credential.UserName -UseRPSSession:$false } },
-        @{Name = "Microsoft Graph"; Cmd = { 
-                $Scopes = @(
-                    "User.Read.All",
-                    "Group.ReadWrite.All",
-                    "Policy.ReadWrite.ConditionalAccess",
-                    "DeviceManagementServiceConfig.ReadWrite.All",
-                    "SecurityEvents.ReadWrite.All" 
-                )
-                Connect-MgGraph -Scopes $Scopes -UseDeviceAuthentication -Verbose
-            }
-        },
-        @{Name = "Microsoft Online"; Cmd = { Connect-MsolService } },
-        @{Name = "Azure AD Preview"; Cmd = { Connect-AzureAD } },
-        #@{Name = "Microsoft Teams"; Cmd = { Connect-MicrosoftTeams -Credential $Credential.UserName } },
-        <#@{Name = "SharePoint Online"; Cmd = { 
-                $orgName = $Credential.UserName.Split('@')[1].Split('.')[0]
-                Connect-SPOService -Url "https://$orgName-admin.sharepoint.com" -Credential $Credential.UserName 
-            }
-        },#>
-        @{Name = "Azure Information Protection"; Cmd = { Connect-AipService } }
-    )
-
-    foreach ($module in $connectionModules) {
-        try {
-            & $module.Cmd
-            Write-Host "$($module.Name) Connected!" -ForegroundColor Green
-            $connectionSummary += [PSCustomObject]@{
-                Module = $module.Name
-                Status = "Connected"
-            }
-        }
-        catch {
-            Write-Host "Failed to connect to $($module.Name). Error: $_" -ForegroundColor Red
-            $connectionSummary += [PSCustomObject]@{
-                Module = $module.Name
-                Status = "Connection Failed"
-            }
-        }
-        Write-Host
-    }
-
-    return $connectionSummary
-}
-
-
 ##############################################################################
 ### Main script logic
 ##############################################################################
@@ -280,76 +203,32 @@ Write-Log "Starting M365 Module Updater" "INFO"
 Write-Host
 Write-Host
 
-$Modules = @(
-    "ExchangeOnlineManagement",
-    "MSOnline",
-    "AzureADPreview",
-    "MSGRAPH",
-    "Microsoft.Graph",
-    "AIPService",
-    "MicrosoftTeams",
-    "Microsoft.Online.SharePoint.PowerShell"
-)
 
-$Answer = Read-Host "Would you like to update/install the required modules? (Y/N)"
-if ($Answer -eq 'Y' -or $Answer -eq 'yes') {
+# List of modules to install/update
+Write-Host
+Write-Host "Checking for Installed Modules..."
 
-    # List of modules to install/update
-    Write-Host
-    Write-Host "Checking for Installed Modules..."
-
-    $installedModules = Get-InstalledModule * | Select-Object -ExpandProperty Name
-    $Modules += $installedModules
-    $Modules = $Modules | Sort-Object -Unique
-    Write-Host
-    Write-Host "Installing Required M365 Modules and Updating All Modules..."
-    Write-Host
-
-    foreach ($Module in $Modules) {
-        if (![string]::IsNullOrEmpty($Module)) {
-            Write-Host
-            Write-Log "Processing module: $Module" "INFO"
-            Update-Module -ModuleName $Module
-        }
-        else {
-            Write-Log "Encountered an empty module name in the list, skipping." "WARNING"
-        }
-    }
-    # Display summary
-    Write-Log "Module Installation/Update Summary:" "INFO"
-    $modulesSummary | Format-Table -AutoSize
-
-    Write-Host
-    Write-Host -ForegroundColor Green "Module Updates Complete."
-    Write-Host "Please double check and make there are no errors and you are running Exchange Online Management Module version 3.2.0 and NOT the latest version."
-    Write-Host "You may re-run this as many times as needed until all modules are correctly installed. If you continue seeing errors, restart your PC."
-}
-
+$installedModules = Get-InstalledModule * | Select-Object -ExpandProperty Name
+$FullModuleList = $Global:Modules += $installedModules
+$FullModuleList = $FullModuleList | Sort-Object -Unique
+Write-Host
+Write-Host "Installing Required M365 Modules and Updating All PS Modules..."
 Write-Host
 
-# Module connection
-$Answer = Read-Host "Would you like to connect to all required services? (Y/N)"
-if ($Answer -eq 'Y' -or $Answer -eq 'yes') {
-
-    # Enter Admin Creds
-    try {
-        $Credential = Get-Credential -ErrorAction Stop
+foreach ($Module in $FullModuleList) {
+    if (![string]::IsNullOrEmpty($Module)) {
+        Write-Host
+        Write-Log "Processing module: $Module" "INFO"
+        Update-Module -ModuleName $Module
     }
-    catch {
-        Write-Host -ForegroundColor Red "Credentials not entered. Exiting..."
-        exit
-    }
-    Write-Host
-
-    # Begin Connecting
-    $connectionSummary = Connect-AllServices $Credential
-
-    Write-Host
-    Write-Host
-
-    # Display connection summary
-    Write-Host "Service Connection Summary:"
-    $connectionSummary | Format-Table -AutoSize
 }
+# Display summary
+Write-Log "Module Installation/Update Summary:" "INFO"
+$modulesSummary | Format-Table -AutoSize
 
-Write-Log "Script execution completed. Please review the log file at $logFile for details." "INFO"
+Write-Host
+Write-Host -ForegroundColor Green "Module Updates Complete."
+Write-Host "Please double check and make there are no errors and you are running Exchange Online Management Module version 3.2.0 and NOT the latest version." -ForegroundColor Yellow
+Write-Host "You may re-run this as many times as needed until all modules are correctly installed. If you continue seeing errors for the same module, restart your PC." -ForegroundColor Yellow
+Write-Host
+Write-Log "M365 Module Updater Log $logFile" "INFO"

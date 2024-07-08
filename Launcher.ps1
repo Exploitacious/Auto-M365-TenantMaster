@@ -25,7 +25,20 @@ Import-Module Microsoft.PowerShell.Utility
 
 # Initialize variables
 $logFile = Join-Path $PSScriptRoot "Launcher_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
-$configFile = Join-Path $PSScriptRoot "config.json"
+$configFile = Join-Path $PSScriptRoot "paths.json"
+$CombinedLogFile = Join-Path $PSScriptRoot "AutoM365Config_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
+
+# Modules
+$Global:Modules = @(
+    "ExchangeOnlineManagement",
+    "MSOnline",
+    "AzureADPreview",
+    "MSGRAPH",
+    "Microsoft.Graph",
+    "AIPService",
+    "MicrosoftTeams",
+    "Microsoft.Online.SharePoint.PowerShell"
+)
 
 # Function to write log messages
 function Write-Log {
@@ -39,21 +52,34 @@ function Write-Log {
     Write-Host $logMessage
 }
 
-# Function to load configuration
+# Function to load and validate configuration
 function Load-Configuration {
     if (Test-Path $configFile) {
-        $config = Get-Content $configFile | ConvertFrom-Json
+        Write-Output "Loading configuration from $configFile"
+        $config = Get-Content $configFile -Raw | ConvertFrom-Json
+        if (-not $config.ScriptPaths) {
+            Write-Log "Configuration file does not contain ScriptPaths. Using default configuration." "WARNING"
+            $config = $null
+        }
     }
     else {
+        Write-Log "Configuration file not found. Using default configuration." "WARNING"
+        $config = $null
+    }
+
+    if (-not $config) {
+        Write-Output "Creating default configuration."
         $config = @{
             ScriptPaths = @{
                 ModuleUpdater        = "M365ModuleUpdater\M365ModuleUpdater.ps1"
+                ModuleConnector      = "M365ModuleConnector\M365ModuleConnector.ps1"
                 TenantExchangeConfig = "TenantExchangeConfig\TenantExchangeConfig.ps1"
                 ATPConfig            = "AdvancedThreatProtection\ATPConfig.ps1"
                 DLPConfig            = "DataLossPrevention\DLPConfig.ps1"
             }
         }
         $config | ConvertTo-Json | Set-Content $configFile
+        Write-Output "Default configuration saved to $configFile"
     }
     return $config
 }
@@ -67,12 +93,13 @@ function Show-Menu {
     Write-Host
     Write-Host "================ $Title ================"
     Write-Host
-    Write-Host "1: Install/Update and Connect Required Modules"
-    Write-Host "2: Configure M365 Tenant and Exchange Online"
-    Write-Host "3: Configure ATP (Advanced Threat Protection)"
-    Write-Host "4: Configure DLP (Data Loss Prevention)"
-    Write-Host "5: Run All Configurations"
-    Write-Host "Q: Quit"
+    Write-Host "1: Install and Update Required Modules"
+    Write-Host "2: Connect All Modules to an M365 Tenant"
+    Write-Host "3: Configure M365 Tenant and Exchange Online"
+    Write-Host "4: Configure ATP (Advanced Threat Protection)"
+    Write-Host "5: Configure DLP (Data Loss Prevention)"
+    Write-Host "6: Run All Configurations"
+    Write-Host "Q: Consolidate logs and Quit"
     Write-Host
 }
 
@@ -86,6 +113,7 @@ function Run-Script {
     try {
         if (Test-Path $ScriptPath) {
             & $ScriptPath
+            Write-Host
             Write-Log "$ScriptName completed successfully" "INFO"
         }
         else {
@@ -95,6 +123,86 @@ function Run-Script {
     catch {
         # Fixed line: Properly expanding variables in the error message
         Write-Log "Error executing $ScriptName : $($_.Exception.Message)" "ERROR"
+    }
+}
+
+# Function to combine log files
+function Combine-LogFiles {
+    # Extract directories from config
+    $directories = @()
+    foreach ($key in $config.ScriptPaths.Keys) {
+        $scriptPath = $config.ScriptPaths[$key]
+        $directory = Split-Path -Path $scriptPath -Parent
+
+        # Convert to absolute path if not already absolute
+        if (-not [System.IO.Path]::IsPathRooted($directory)) {
+            $absoluteDirectory = [System.IO.Path]::Combine($PSScriptRoot, $directory)
+        }
+        else {
+            $absoluteDirectory = $directory
+        }
+
+        # Debug output to verify each directory
+        Write-Output "Attempting to extract directory from script path: $scriptPath"
+        Write-Output "Extracted directory path: $absoluteDirectory"
+
+        if (Test-Path -Path $absoluteDirectory) {
+            $fullDirectoryPath = (Get-Item $absoluteDirectory).FullName
+            $directories += $fullDirectoryPath
+            Write-Output "Verified and added directory: $fullDirectoryPath"
+        }
+        else {
+            Write-Error "Directory not found: $absoluteDirectory"
+        }
+    }
+
+    # Debug output to verify the directories array
+    Write-Output "Directories extracted: $($directories | Out-String)"
+
+    # Check if any directories were found
+    if ($directories.Count -eq 0) {
+        Write-Error "No directories found in config."
+        return
+    }
+
+    # Create or clear the output file
+    try {
+        New-Item -Path $CombinedLogFile -ItemType File -Force | Out-Null
+        Write-Output "Output file created: $CombinedLogFile"
+    }
+    catch {
+        Write-Error "Unable to create or clear the output file: $CombinedLogFile"
+        return
+    }
+
+    $logFilesFound = $false
+
+    # Loop through each directory and combine log files
+    foreach ($directory in $directories) {
+        Write-Output "Processing directory: $directory"
+        if (Test-Path -Path $directory) {
+            $logFiles = Get-ChildItem -Path $directory -Filter *.log -File
+            if ($logFiles.Count -gt 0) {
+                $logFilesFound = $true
+                foreach ($logFile in $logFiles) {
+                    Get-Content -Path $logFile.FullName | Add-Content -Path $CombinedLogFile
+                    Write-Output "Combined log file: $($logFile.FullName)"
+                }
+            }
+            else {
+                Write-Output "No log files found in directory: $directory"
+            }
+        }
+        else {
+            Write-Error "Directory not found: $directory"
+        }
+    }
+
+    if (-Not $logFilesFound) {
+        Write-Output "No log files found. Exiting..."
+    }
+    else {
+        Write-Output "Log files combined into: $CombinedLogFile"
     }
 }
 
@@ -186,7 +294,7 @@ function Check-ExistingConnections {
 function Prompt-ExistingConnections {
     $existingConnections = Check-ExistingConnections
     if ($existingConnections.Count -gt 0) {
-        Write-Host "The following connections are already established:" -ForegroundColor Yellow
+        Write-Host "Connections Established:" -ForegroundColor Yellow
         $existingConnections | ForEach-Object { Write-Host "- $_" -ForegroundColor Cyan }
         $action = Read-Host "`nDo you want to disconnect these sessions before proceeding? (Y/N)"
         if ($action -eq 'Y' -or $action -eq 'y') {
@@ -195,19 +303,24 @@ function Prompt-ExistingConnections {
             Write-Log "Existing connections have been closed." "INFO"
         }
         else {
-            Write-Log "Proceeding with existing connections. This may affect the module update process." "WARNING"
+            Write-Host
+            Write-Log "Proceeding with existing connections." "INFO"
         }
     }
     else {
+        Write-Host
         Write-Log "No existing tenant connections detected." "INFO"
     }
 }
 
+##################################################
+### Main script logic
+##################################################
 
 # Load configuration
 $config = Load-Configuration
 
-# Main script logic
+# Menu Loop
 do {
     Write-Host
     Write-Host
@@ -220,10 +333,11 @@ do {
     $input = Read-Host "Please make a selection"
     switch ($input) {
         '1' { Run-Script $config.ScriptPaths.ModuleUpdater "Module Updater" }
-        '2' { Run-Script $config.ScriptPaths.TenantExchangeConfig "Tenant and Exchange Configuration" }
-        '3' { Run-Script $config.ScriptPaths.ATPConfig "ATP Configuration" }
-        '4' { Run-Script $config.ScriptPaths.DLPConfig "DLP Configuration" }
-        '5' {
+        '2' { Run-Script $config.ScriptPaths.ModuleConnector "Module Connector" } 
+        '3' { Run-Script $config.ScriptPaths.TenantExchangeConfig "Tenant and Exchange Configuration" }
+        '4' { Run-Script $config.ScriptPaths.ATPConfig "ATP Configuration" }
+        '5' { Run-Script $config.ScriptPaths.DLPConfig "DLP Configuration" }
+        '6' {
             # Run all configurations in parallel
             $jobs = @(
                 Start-Job -ScriptBlock { Run-Script $using:config.ScriptPaths.ModuleUpdater "Module Updater" }
@@ -243,11 +357,13 @@ do {
         }
         'q' { 
             Write-Log "Exiting script" "INFO"
+
+            # Attempt Combine
+            # Combine-LogFiles # Gotta fix this later.
+
             return
         }
     }
     pause
 }
 until ($input -eq 'q')
-
-Write-Log "Script execution completed" "INFO"
