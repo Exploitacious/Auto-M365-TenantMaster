@@ -20,11 +20,8 @@ function Write-Log {
     Write-Host $logMessage
 }
 
-# Function to Import all services
+# Function to Import All Services
 function Import-AllServices {
-    param (
-        [PSCredential]$Global:Credential
-    )
 
     Write-Host
     Write-Host "Please be patient as we import modules..."
@@ -35,21 +32,24 @@ function Import-AllServices {
         if ($Module -eq "Microsoft.Graph") {
             # Import specific SubModules for Microsoft.Graph
             $SubModules = @(
+                "Microsoft.Graph.Identity.SignIns"
+                "Microsoft.Graph.Intune"
+                "Microsoft.Graph.DeviceManagement"
+                "Microsoft.Graph.Compliance"
                 "Microsoft.Graph.Users"
                 "Microsoft.Graph.Groups"
-                "Microsoft.Graph.Identity.ConditionalAccess"
-                "Microsoft.Graph.DeviceManagement"
+                "Microsoft.Graph.Authentication"
                 "Microsoft.Graph.Security"
             )
 
             try {
                 foreach ($SubModule in $SubModules) {
                     Import-Module $SubModule
-                    Write-Log "Imported Module: $SubModule" "INFO"
+                    Write-Log "Imported Graph Module: $SubModule" "INFO"
                 }                
             }
             catch {
-                Write-Log "Unable to import $SubModule. Details: $_" "ERROR"
+                Write-Log "Unable to import Graph Module $SubModule. Details: $_" "ERROR"
                 Write-Host
                 Write-Host "You may need to re-run the Module installation script" -ForegroundColor Yellow
                 Exit
@@ -72,7 +72,12 @@ function Import-AllServices {
     }
 }
 
+# Funciton to Connect All Services
 function Connect-AllServices {
+    param (
+        [PSCredential]$Global:Credential
+    )
+
     Write-Host
     Write-Host "Connecting Modules..."
     Write-Host
@@ -81,46 +86,72 @@ function Connect-AllServices {
 
     $connectionSummary = @()
     $connectionModules = @(
-        @{Name = "Exchange Online"; Cmd = { Connect-ExchangeOnline -UserPrincipalName $Global:Credential.UserName } },
-        @{Name = "Security & Compliance Center"; Cmd = { Connect-IPPSSession -UserPrincipalName $Global:Credential.UserName -UseRPSSession:$false } },
-        @{Name = "Microsoft Graph"; Cmd = { 
+        # @{Name = "Exchange Online"; Cmd = { Connect-ExchangeOnline -UserPrincipalName $Global:Credential.UserName } },
+        # @{Name = "Security & Compliance Center"; Cmd = { Connect-IPPSSession -UserPrincipalName $Global:Credential.UserName -UseRPSSession:$false } },
+        <#@{Name = "Microsoft Graph"; Cmd = { 
                 $Scopes = @(
-                    "User.Read.All",
+                    "User.ReadWrite.All"
                     "Group.ReadWrite.All"
-                    #"Policy.ReadWrite.ConditionalAccess",
-                    #"DeviceManagementServiceConfig.ReadWrite.All",
-                    #"SecurityEvents.ReadWrite.All" 
+                    "Directory.ReadWrite.All"
+                    "Organization.ReadWrite.All"
+                    "Device.ReadWrite.All"
+                    "DeviceManagementConfiguration.ReadWrite.All"
+                    #"Policy.ReadWrite.All"
+                    "SecurityEvents.ReadWrite.All"
+                    "MailboxSettings.ReadWrite"
+                    "Reports.Read.All"
+                    "AuditLog.Read.All"
+                    "RoleManagement.ReadWrite.Directory"
+                    "Application.ReadWrite.All"
+                    "TeamSettings.ReadWrite.All"
+                    #"Channel.ReadWrite.All"
+                    "Sites.FullControl.All"
+                    "IdentityRiskyUser.ReadWrite.All"
+                    "ThreatAssessment.ReadWrite.All"
+                    #"ComplianceManager.ReadWrite.All"
+                    "UserAuthenticationMethod.ReadWrite.All"
                 )
-                Connect-MgGraph -Scopes $Scopes -UseDeviceAuthentication -Verbose
+                Connect-MgGraph -Scopes $Scopes -NoWelcome -ErrorAction Stop
             }
-        },
-        @{Name = "Microsoft Online"; Cmd = { Connect-MsolService } },
-        @{Name = "Azure AD Preview"; Cmd = { Connect-AzureAD } },
-        @{Name = "Azure Information Protection"; Cmd = { Connect-AipService } }
-        #@{Name = "Microsoft Teams"; Cmd = { Connect-MicrosoftTeams -Credential $Global:Credential.UserName } },
-        <#@{Name = "SharePoint Online"; Cmd = { 
-                $orgName = $Global:Credential.UserName.Split('@')[1].Split('.')[0]
-                Connect-SPOService -Url "https://$orgName-admin.sharepoint.com" -Credential $Global:Credential.UserName 
+        }#>
+        # @{Name = "Microsoft Online"; Cmd = { Connect-MsolService } },
+        # @{Name = "Azure AD Preview"; Cmd = { Connect-AzureAD } },
+        # @{Name = "Azure Information Protection"; Cmd = { Connect-AipService } },
+        # @{Name = "Microsoft Teams"; Cmd = { Connect-MicrosoftTeams } },
+        @{Name = "SharePoint Online"; Cmd = { 
+                Connect-SPOService -Url "https://$Global:TenantDomain-admin.sharepoint.com" -UseWebLogin
             }
-        },#>
+        }
     )
 
     foreach ($module in $connectionModules) {
-        try {
-            & $module.Cmd
-            Write-Log "$($module.Name) Connected" "INFO"
-            Write-Host "$($module.Name) Connected!" -ForegroundColor Green
+        # Gotta fix connection Checking
+        #$isConnected = Test-ServiceConnection -ServiceName $module.Name
+        $isConnected = $Global:existingConnections -contains $module.Name
+        if ($isConnected) {
+            Write-Host "$($module.Name) Connected" -ForegroundColor Green
             $connectionSummary += [PSCustomObject]@{
                 Module = $module.Name
                 Status = "Connected"
             }
         }
-        catch {
-            Write-Host "Failed to connect to $($module.Name). Error: $_" -ForegroundColor Red
-            Write-Log "Failed to connect to $($module.Name). Error: $_"
-            $connectionSummary += [PSCustomObject]@{
-                Module = $module.Name
-                Status = "FAILED"
+        else {
+            try {
+                & $module.Cmd # Connection Magic
+                Write-Log "$($module.Name) Connected" "INFO"
+                Write-Host "$($module.Name) Connected!" -ForegroundColor Green
+                $connectionSummary += [PSCustomObject]@{
+                    Module = $module.Name
+                    Status = "Connected"
+                }
+            }
+            catch {
+                Write-Host "Failed to connect to $($module.Name). Error: $_" -ForegroundColor Red
+                Write-Log "Failed to connect to $($module.Name). Error: $_"
+                $connectionSummary += [PSCustomObject]@{
+                    Module = $module.Name
+                    Status = "FAILED"
+                }
             }
         }
         Write-Host
@@ -150,14 +181,13 @@ If ($null -eq $Global:Credential.UserName) {
     Write-Host
 }
 else {
-    Write-Log "Credentials $($Global:Credential.UserName) being used"
+    Write-Log "$Global:TenantDomain Credentials $($Global:Credential.UserName) being used"
 }
 
-# Begin Checking and Connecting
-
+# Begin Checking and Connecting Services
 Import-AllServices
-
-# $connectionSummary = Connect-AllServices $Global:Credential
+Start-Sleep -Seconds 2
+$connectionSummary = Connect-AllServices $Global:Credential
 
 Write-Host
 Write-Host
@@ -165,4 +195,3 @@ Write-Host
 # Display connection summary
 Write-Host "Service Connection Summary:"
 $connectionSummary | Format-Table -AutoSize
-

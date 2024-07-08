@@ -30,13 +30,13 @@ $CombinedLogFile = Join-Path $PSScriptRoot "AutoM365Config_$(Get-Date -Format 'y
 
 # Modules
 $Global:Modules = @(
-    "ExchangeOnlineManagement",
-    "MSOnline",
-    "AzureADPreview",
-    "MSGRAPH",
-    "Microsoft.Graph",
-    "AIPService",
-    "MicrosoftTeams",
+    "ExchangeOnlineManagement"
+    "AzureADPreview"
+    "MSOnline"
+    "MSGRAPH"
+    "Microsoft.Graph"
+    "AIPService"
+    "MicrosoftTeams"
     "Microsoft.Online.SharePoint.PowerShell"
 )
 
@@ -295,11 +295,11 @@ function Check-ExistingConnections {
 
 # Function to display existing connections and prompt for action
 function Prompt-ExistingConnections {
-    $existingConnections = Check-ExistingConnections
-    if ($existingConnections.Count -gt 0) {
+    $Global:existingConnections = Check-ExistingConnections
+    if ($Global:existingConnections.Count -gt 0) {
         Write-Host
         Write-Host "Connections Established:" -ForegroundColor Yellow
-        $existingConnections | ForEach-Object { Write-Host "- $_" -ForegroundColor Cyan }
+        $Global:existingConnections | ForEach-Object { Write-Host "- $_" -ForegroundColor Cyan }
         Write-Host
         Write-Host
         Write-Log "Proceeding with existing connections." "INFO"
@@ -308,6 +308,21 @@ function Prompt-ExistingConnections {
         Write-Host
         Write-Host
         Write-Log "No existing tenant connections detected." "INFO"
+    }
+
+    # Admin/Tenant in Use
+    if ($null -eq $Global:Credential) {
+        Write-Host
+        Write-Log "No Admin Account being used" "WARNING"
+    }
+    else {
+        #Set Tenant Domain
+        $Global:TenantDomain = $Global:Credential.UserName.Split('@')[1].Split('.')[0]
+        Write-Host
+        Write-Log "$Global:TenantDomain $($Global:Credential.UserName) account connected" "INFO"
+        Write-Host
+        Write-Host "$Global:TenantDomain" -ForegroundColor Green
+        Write-Host "$($Global:Credential.UserName) account connected" -ForegroundColor Green
     }
 }
 
@@ -335,29 +350,11 @@ do {
         '3' { Run-Script $config.ScriptPaths.TenantExchangeConfig "Tenant and Exchange Configuration" }
         '4' { Run-Script $config.ScriptPaths.ATPConfig "ATP Configuration" }
         '5' { Run-Script $config.ScriptPaths.DLPConfig "DLP Configuration" }
-        '6' {
-            # Run all configurations in parallel
-            $jobs = @(
-                Start-Job -ScriptBlock { Run-Script $using:config.ScriptPaths.ModuleUpdater "Module Updater" }
-                Start-Job -ScriptBlock { Run-Script $using:config.ScriptPaths.TenantExchangeConfig "Tenant and Exchange Configuration" }
-                Start-Job -ScriptBlock { Run-Script $using:config.ScriptPaths.ATPConfig "ATP Configuration" }
-                Start-Job -ScriptBlock { Run-Script $using:config.ScriptPaths.DLPConfig "DLP Configuration" }
-            )
-            
-            # Wait for all jobs to complete
-            $jobs | Wait-Job
-
-            # Get the results
-            $jobs | ForEach-Object {
-                Receive-Job -Job $_
-                Remove-Job -Job $_
-            }
-        }
         'q' { 
             Write-Log "Exiting script..." "INFO"
 
             # Attempt Combine
-            # Combine-LogFiles # Gotta fix this later.
+            # Combine-LogFiles # Gotta fix this
             
             # Terminating Module Connections
             Write-Host "Disconnecting all sessions" -ForegroundColor Yellow
