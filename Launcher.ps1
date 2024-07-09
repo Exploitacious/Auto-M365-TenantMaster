@@ -19,6 +19,17 @@ Write-Host
 Write-Host " Created by Alex Ivantsov @Exploitacious "
 Write-Host
 
+# Check PowerShell version
+if ($PSVersionTable.PSVersion.Major -lt 5) {
+    Write-Host "This script requires PowerShell 5.1 or later. Your version is $($PSVersionTable.PSVersion). Please upgrade PowerShell and try again." -ForegroundColor Red
+    exit
+}
+
+# Verify/Elevate Admin Session.
+if (!([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")) { 
+    Start-Process powershell.exe "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
+    exit 
+}
 
 # Import required modules
 Import-Module Microsoft.PowerShell.Utility
@@ -37,7 +48,7 @@ $Global:Modules = @(
     "Microsoft.Graph"
     "AIPService"
     "MicrosoftTeams"
-    "Microsoft.Online.SharePoint.PowerShell"
+    "PnP.PowerShell"
 )
 
 # Max Function Count
@@ -102,7 +113,7 @@ function Show-Menu {
     Write-Host "4: Configure ATP (Advanced Threat Protection)"
     Write-Host "5: Configure DLP (Data Loss Prevention)"
     Write-Host "6: Run All Configurations"
-    Write-Host "Q: Consolidate logs, Terminate Connections and Quit"
+    Write-Host "Q: Terminate Connections and Quit"
     Write-Host
 }
 
@@ -319,10 +330,10 @@ function Prompt-ExistingConnections {
         #Set Tenant Domain
         $Global:TenantDomain = $Global:Credential.UserName.Split('@')[1].Split('.')[0]
         Write-Host
-        Write-Log "$Global:TenantDomain $($Global:Credential.UserName) account connected" "INFO"
+        Write-Log "$Global:TenantDomain $($Global:Credential.UserName) account in use" "INFO"
         Write-Host
-        Write-Host "$Global:TenantDomain" -ForegroundColor Green
-        Write-Host "$($Global:Credential.UserName) account connected" -ForegroundColor Green
+        Write-Host "Tenant Domain: $Global:TenantDomain" -ForegroundColor Green
+        Write-Host "Credential: $($Global:Credential.UserName)" -ForegroundColor Green
     }
 }
 
@@ -358,6 +369,7 @@ do {
             
             # Terminating Module Connections
             Write-Host "Disconnecting all sessions" -ForegroundColor Yellow
+            $Global:Credential = $null
             Get-PSSession | Remove-PSSession -ErrorAction SilentlyContinue
             Disconnect-AzureAD -ErrorAction SilentlyContinue
             Write-Log "Existing connections have been closed." "INFO"

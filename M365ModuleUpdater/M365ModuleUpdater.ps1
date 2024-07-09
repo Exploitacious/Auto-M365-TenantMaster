@@ -3,18 +3,6 @@ Write-Host
 Write-Host "================ M365 Module Install and Updater ================"
 Write-Host
 
-# Check PowerShell version
-if ($PSVersionTable.PSVersion.Major -lt 5) {
-    Write-Host "This script requires PowerShell 5.1 or later. Your version is $($PSVersionTable.PSVersion). Please upgrade PowerShell and try again." -ForegroundColor Red
-    exit
-}
-
-# Verify/Elevate Admin Session.
-if (!([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")) { 
-    Start-Process powershell.exe "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
-    exit 
-}
-
 # Import required modules
 Import-Module Microsoft.PowerShell.Utility
 
@@ -22,6 +10,10 @@ Import-Module Microsoft.PowerShell.Utility
 $modulesSummary = @()
 $logFile = Join-Path $PSScriptRoot "ModuleUpdater_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
 $rollbackInfo = @{}
+$ModuleBlacklist = @(
+    "AzureAD"
+    "Microsoft.Online.SharePoint.PowerShell"
+)
 
 # Function to write log messages
 function Write-Log {
@@ -35,8 +27,31 @@ function Write-Log {
     Write-Host $logMessage
 }
 
+# Function to remove specified modules
+function Remove-Modules {
+    param (
+        [string[]]$ModuleName
+    )
+    
+    foreach ($module in $ModuleName) {
+        Write-Log "Checking for un-needed module: $module" "INFO"
+        $installedModule = Get-InstalledModule -Name $module -ErrorAction SilentlyContinue
+        
+        if ($installedModule) {
+            Write-Log "Removing module: $module" "INFO"
+            try {
+                Uninstall-Module -Name $module -AllVersions -Force
+                Write-Log "Attempted to remove module: $module" "INFO"
+            }
+            catch {
+                Write-Log "Failed to remove module: $module. Error: $($_.Exception.Message)" "ERROR"
+            }
+        }
+    }
+}
+
 # Update Modules with specific versioning enabled
-function Update-Module {
+function Update-Modules {
     param (
         [string]$ModuleName
     )
@@ -135,7 +150,29 @@ function Update-Module {
         }
     }
 
+    #####
     # Main Logic
+    #####
+
+    # Check for Azure AD over Azure AD Preview
+    if ($ModuleName -eq "AzureADPreview") {
+        # Check if AzureAD is installed
+        $azureADInstalled = Get-InstalledModule -Name "AzureAD" -ErrorAction SilentlyContinue
+        if ($azureADInstalled) {
+            Write-Log "AzureAD module detected. Uninstalling before installing AzureADPreview." "WARNING"
+            try {
+                Attempt-ForceCloseModule "AzureAD"
+                Uninstall-Module -Name "AzureAD" -AllVersions -Force
+                Write-Log "AzureAD module uninstall attempted." "INFO"
+            }
+            catch {
+                Write-Log "Failed to uninstall AzureAD module. Error: $($_.Exception.Message)" "ERROR"
+                $status = "AzureAD Uninstall Failed"
+                return
+            }
+        }
+    }
+
     if ($null -eq $currentVersions) {
         # New Install
         Write-Log "$($CurrentModule.Name) - Installing ${ModuleName} from PowerShellGallery. Version: $($CurrentModule.Version). Release date: $($CurrentModule.PublishedDate)" "INFO"
@@ -202,12 +239,9 @@ function Update-Module {
 Write-Log "Starting M365 Module Updater" "INFO"
 Write-Host
 Write-Host
-
-
-# List of modules to install/update
-Write-Host
 Write-Host "Checking for Installed Modules..."
 
+# List of modules to install/update
 $installedModules = Get-InstalledModule * | Select-Object -ExpandProperty Name
 $FullModuleList = $Global:Modules += $installedModules
 $FullModuleList = $FullModuleList | Sort-Object -Unique
@@ -215,13 +249,23 @@ Write-Host
 Write-Host "Installing Required M365 Modules and Updating All PS Modules..."
 Write-Host
 
+# Remove
+foreach ($Module in $ModuleBlacklist) {
+    if (![string]::IsNullOrEmpty($Module)) {
+        Write-Host
+        Remove-Modules -ModuleName $Module
+    }
+}
+
+# Install/Update
 foreach ($Module in $FullModuleList) {
     if (![string]::IsNullOrEmpty($Module)) {
         Write-Host
         Write-Log "Processing module: $Module" "INFO"
-        Update-Module -ModuleName $Module
+        Update-Modules -ModuleName $Module
     }
 }
+
 # Display summary
 Write-Log "Module Installation/Update Summary:" "INFO"
 $modulesSummary | Format-Table -AutoSize
