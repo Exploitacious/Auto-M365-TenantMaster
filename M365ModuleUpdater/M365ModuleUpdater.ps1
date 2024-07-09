@@ -1,6 +1,24 @@
 # M365 Module Updater
+# Verify/Elevate Admin Session.
+if (!([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")) { 
+    Start-Process powershell.exe "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
+    exit 
+}
+
+# Set the MaximumFunctionCount
+$MaximumFunctionCount = 32768
+
+# Directly set the MaximumFunctionCount using $ExecutionContext
+try {
+    $executionContext.SessionState.PSVariable.Set('MaximumFunctionCount', $MaximumFunctionCount)
+}
+catch {
+    Write-Error "Failed to set MaximumFunctionCount: $_"
+    exit
+}
+
 Write-Host
-Write-Host "================ M365 Module Install and Updater ================"
+Write-Host "================ M365 Module Install and Updater ================" -ForegroundColor DarkCyan
 Write-Host
 
 # Import required modules
@@ -9,10 +27,9 @@ Import-Module Microsoft.PowerShell.Utility
 # Initialize variables
 $modulesSummary = @()
 $logFile = Join-Path $PSScriptRoot "ModuleUpdater_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
-$rollbackInfo = @{}
 $ModuleBlacklist = @(
     "AzureAD"
-    "Microsoft.Online.SharePoint.PowerShell"
+    "PnP.PowerShell"
 )
 
 # Function to write log messages
@@ -240,7 +257,8 @@ Write-Log "Starting M365 Module Updater" "INFO"
 
 # List of modules to Remove/Install/Update
 $installedModules = Get-InstalledModule * | Select-Object -ExpandProperty Name
-$FullModuleList = $Global:Modules += $installedModules
+$FullModuleList = $Global:Modules
+$FullModuleList = $FullModuleList += $installedModules
 $FullModuleList = $FullModuleList | Sort-Object -Unique
 $FullModuleList = $FullModuleList | Where-Object { $_ -notin $ModuleBlacklist }
 

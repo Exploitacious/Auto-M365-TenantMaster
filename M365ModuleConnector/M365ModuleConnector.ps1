@@ -1,12 +1,27 @@
 # M365 Module Connector
+# Verify/Elevate Admin Session.
+if (!([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")) { 
+    Start-Process powershell.exe "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
+    exit 
+}
+
+# Set the MaximumFunctionCount
+$MaximumFunctionCount = 32768
+
+# Directly set the MaximumFunctionCount using $ExecutionContext
+try {
+    $executionContext.SessionState.PSVariable.Set('MaximumFunctionCount', $MaximumFunctionCount)
+}
+catch {
+    Write-Error "Failed to set MaximumFunctionCount: $_"
+    exit
+}
+
 Write-Host
-Write-Host "================ M365 Module Connector ================"
+Write-Host "================ M365 Module Connector ================" -ForegroundColor DarkCyan
 Write-Host
 
 $logFile = Join-Path $PSScriptRoot "ModuleConnector_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
-
-# Max Function Count
-$maximumfunctioncount = 32768
 
 # Function to write log messages
 function Write-Log {
@@ -59,7 +74,7 @@ function Import-AllServices {
         else {
             #Normal Modules
             try {
-                Import-Module $Module
+                Import-Module $Module -ErrorAction Stop
                 Write-Log "Imported Module: $Module" "INFO"
             }
             catch {
@@ -84,11 +99,18 @@ function Connect-AllServices {
     Write-Host "You will be prompted for authentication for each service. Please complete the MFA process when required." -ForegroundColor Green
     Write-Host
 
+    # Module Connections
     $connectionSummary = @()
     $connectionModules = @(
-        # @{Name = "Exchange Online"; Cmd = { Connect-ExchangeOnline -UserPrincipalName $Global:Credential.UserName } },
-        # @{Name = "Security & Compliance Center"; Cmd = { Connect-IPPSSession -UserPrincipalName $Global:Credential.UserName -UseRPSSession:$false } },
-        <#@{Name = "Microsoft Graph"; Cmd = { 
+    
+        # Exchange Online Management     
+        @{Name = "Exchange Online"; Cmd = { Connect-ExchangeOnline -UserPrincipalName $Global:Credential.UserName } },
+
+        # Security Compliance Center
+        @{Name = "Security & Compliance Center"; Cmd = { Connect-IPPSSession -UserPrincipalName $Global:Credential.UserName -UseRPSSession:$false } },
+
+        # NEW Graph API
+        @{Name = "Microsoft Graph"; Cmd = { 
                 $Scopes = @(
                     "User.ReadWrite.All"
                     "Group.ReadWrite.All"
@@ -113,13 +135,23 @@ function Connect-AllServices {
                 )
                 Connect-MgGraph -Scopes $Scopes -NoWelcome -ErrorAction Stop
             }
-        }#>
-        # @{Name = "Microsoft Online"; Cmd = { Connect-MsolService } },
-        # @{Name = "Azure AD Preview"; Cmd = { Connect-AzureAD } },
-        # @{Name = "Azure Information Protection"; Cmd = { Connect-AipService } },
-        # @{Name = "Microsoft Teams"; Cmd = { Connect-MicrosoftTeams } },
+        },
+
+        # Microsoft Online MSOL
+        @{Name = "Microsoft Online"; Cmd = { Connect-MsolService } },
+
+        # Azure AD
+        @{Name = "Azure AD Preview"; Cmd = { Connect-AzureAD } },
+
+        # Information Protection
+        @{Name = "Azure Information Protection"; Cmd = { Connect-AipService } },
+
+        # Teams Admin
+        @{Name = "Microsoft Teams"; Cmd = { Connect-MicrosoftTeams } },
+
+        # SharePoint Admin
         @{Name = "SharePoint Online"; Cmd = { 
-                Connect-SPOService -Url "https://$Global:TenantDomain-admin.sharepoint.com" -UseWebLogin
+                Connect-SPOService -Url "https://$Global:TenantDomain-admin.sharepoint.com"
             }
         }
     )
@@ -128,6 +160,7 @@ function Connect-AllServices {
         # Gotta fix connection Checking
         #$isConnected = Test-ServiceConnection -ServiceName $module.Name
         $isConnected = $Global:existingConnections -contains $module.Name
+        
         if ($isConnected) {
             Write-Host "$($module.Name) Connected" -ForegroundColor Green
             $connectionSummary += [PSCustomObject]@{
@@ -140,6 +173,7 @@ function Connect-AllServices {
                 & $module.Cmd # Connection Magic
                 Write-Log "$($module.Name) Connected" "INFO"
                 Write-Host "$($module.Name) Connected!" -ForegroundColor Green
+                Start-Sleep 3 # Wait needed for successful connections...
                 $connectionSummary += [PSCustomObject]@{
                     Module = $module.Name
                     Status = "Connected"
@@ -189,9 +223,17 @@ Import-AllServices
 Start-Sleep -Seconds 2
 $connectionSummary = Connect-AllServices $Global:Credential
 
-Write-Host
-Write-Host
-
 # Display connection summary
-Write-Host "Service Connection Summary:"
+Write-Host
+Write-Host -ForegroundColor DarkGreen "Module Connections Complete. Service Connection Summary:"
 $connectionSummary | Format-Table -AutoSize
+
+# More Info
+Write-Host
+Write-Host "Please double check and make there are absolutely NO errors." -ForegroundColor Cyan
+Write-Host "You may re-run this as many times as needed until all modules are successfully connected" -ForegroundColor Cyan
+Write-Host
+Write-Host "=== If you continue seeing errors for a problematic module: " -ForegroundColor Yellow
+Write-Host " - Open a new PowerShell Window as Admin and attempt to connect the module manualy" -ForegroundColor Yellow
+Write-Host
+Write-Log "M365 Module Connector Log $logFile" "INFO"

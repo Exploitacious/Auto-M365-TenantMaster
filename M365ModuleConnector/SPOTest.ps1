@@ -1,40 +1,60 @@
-# Check/Enter Admin Creds
-If ($null -eq $Global:Credential.UserName) {
-    try {
-        $Global:Credential = Get-Credential -ErrorAction Stop
+
+
+try {
+    Connect-PnPOnline -Url "https://$TenantDomain-admin.sharepoint.com" -Credentials $Credential
+    Write-Output "Successfully connected to SharePoint Online using PnP PowerShell."
+    return $true
+}
+catch {
+    Write-Output "Failed to connect to SharePoint Online using PnP PowerShell. Error: $_"
+    return $false
+}
+
+
+
+
+$connectionModules = @(
+    @{Name = "SharePoint Online"; Cmd = {
+            Connect-SharePointOnlinePnP -TenantDomain $Global:TenantDomain -Credential $Global:Credential
+        }
     }
-    catch {
-        Write-Host -ForegroundColor Red "Credentials not entered. Exiting..."
-        exit
+)
+
+foreach ($module in $connectionModules) {
+    # Gotta fix connection Checking
+    #$isConnected = Test-ServiceConnection -ServiceName $module.Name
+    $isConnected = $Global:existingConnections -contains $module.Name
+    if ($isConnected) {
+        Write-Host "$($module.Name) Connected" -ForegroundColor Green
+        $connectionSummary += [PSCustomObject]@{
+            Module = $module.Name
+            Status = "Connected"
+        }
+    }
+    else {
+        try {
+            $connected = & $module.Cmd # Connection Magic
+            if ($connected) {
+                Write-Log "$($module.Name) Connected" "INFO"
+                Write-Host "$($module.Name) Connected!" -ForegroundColor Green
+                $connectionSummary += [PSCustomObject]@{
+                    Module = $module.Name
+                    Status = "Connected"
+                }
+            }
+            else {
+                throw "Connection failed"
+            }
+        }
+        catch {
+            Write-Host "Failed to connect to $($module.Name). Error: $_" -ForegroundColor Red
+            Write-Log "Failed to connect to $($module.Name). Error: $_"
+            $connectionSummary += [PSCustomObject]@{
+                Module = $module.Name
+                Status = "FAILED"
+            }
+        }
     }
     Write-Host
 }
-else {
-    Write-Host " $($Global:Credential.UserName) being used"
-}
-
-# Connect to Azure AD
-Write-Host "Logging into AzureAD..."
-Connect-AzureAD
-
-# Obtain the access token
-Write-Host "Gathering Token..."
-$token = (Get-AzureADSignedInUserAccessToken).AccessToken
-
-# Set the Authorization header
-Write-Host "Setting Headers..."
-$headers = @{
-    Authorization = "Bearer $token"
-}
-
-# Connect to SharePoint Online using the token
-Write-Host "Logging into SPO..."
-$spoUrl = "https://$Global:TenantDomain-admin.sharepoint.com"
-$response = Invoke-RestMethod -Uri $spoUrl -Headers $headers -Method Get
-
-if ($response.StatusCode -eq 200) {
-    Write-Output "Successfully connected to SharePoint Online."
-}
-else {
-    Write-Output "Failed to connect to SharePoint Online. Status code: $($response.StatusCode)"
-}
+return $connectionSummary

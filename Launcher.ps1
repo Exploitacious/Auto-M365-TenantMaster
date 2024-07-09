@@ -1,4 +1,21 @@
-# M365 Configuration Launcher
+### M365 Configuration Launcher
+# Verify/Elevate Admin Session.
+if (!([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")) { 
+    Start-Process powershell.exe "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
+    exit 
+}
+
+# Set the MaximumFunctionCount
+$MaximumFunctionCount = 32768
+
+# Directly set the MaximumFunctionCount using $ExecutionContext
+try {
+    $executionContext.SessionState.PSVariable.Set('MaximumFunctionCount', $MaximumFunctionCount)
+}
+catch {
+    Write-Error "Failed to set MaximumFunctionCount: $_"
+    exit
+}
 
 Clear-Host
 Write-Host "                            .___  ___.  ____      __    _____                                               "
@@ -25,11 +42,7 @@ if ($PSVersionTable.PSVersion.Major -lt 5) {
     exit
 }
 
-# Verify/Elevate Admin Session.
-if (!([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")) { 
-    Start-Process powershell.exe "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
-    exit 
-}
+
 
 # Import required modules
 Import-Module Microsoft.PowerShell.Utility
@@ -48,11 +61,8 @@ $Global:Modules = @(
     "Microsoft.Graph"
     "AIPService"
     "MicrosoftTeams"
-    "PnP.PowerShell"
+    "Microsoft.Online.SharePoint.PowerShell"
 )
-
-# Max Function Count
-$maximumfunctioncount = 32768
 
 # Function to write log messages
 function Write-Log {
@@ -105,7 +115,7 @@ function Show-Menu {
     )
 
     Write-Host
-    Write-Host "================ $Title ================"
+    Write-Host "================ $Title ================" -ForegroundColor DarkCyan
     Write-Host
     Write-Host "1: Install and Update Required Modules"
     Write-Host "2: Connect All Modules to an M365 Tenant"
@@ -328,10 +338,90 @@ function Prompt-ExistingConnections {
     else {
         #Set Tenant Domain
         $Global:TenantDomain = $Global:Credential.UserName.Split('@')[1].Split('.')[0]
-        Write-Log "Connected to $Global:TenantDomain with $($Global:Credential.UserName)" "INFO"
+        Write-Log "Established Creds to $Global:TenantDomain with $($Global:Credential.UserName)" "INFO"
         Write-Host
         Write-Host "-= Tenant Domain: $Global:TenantDomain" -ForegroundColor Green
-        Write-Host "-=== Credential: $($Global:Credential.UserName)" -ForegroundColor Green
+        Write-Host "-== Credential: $($Global:Credential.UserName)" -ForegroundColor Green
+    }
+}
+
+# Function to disconnect from all open connections
+function Close-ExistingConnections {
+    param (
+        [string[]]$connections
+    )
+
+    foreach ($connection in $connections) {
+        if ($connection -match "Exchange Online") {
+            try {
+                Disconnect-ExchangeOnline -Confirm:$false
+                Write-Host " - Disconnected from Exchange Online" -ForegroundColor DarkYellow
+                Write-Host
+            }
+            catch {
+                Write-Warning "Failed to disconnect from Exchange Online: $_"
+            }
+        }
+        elseif ($connection -match "Azure AD") {
+            try {
+                Disconnect-AzureAD -Confirm:$false
+                Write-Host " - Disconnected from Azure AD" -ForegroundColor DarkYellow
+                Write-Host
+            }
+            catch {
+                Write-Warning "Failed to disconnect from Azure AD: $_"
+            }
+        }
+        elseif ($connection -match "MSOnline") {
+            try {
+                #Remove-Module -Name MSOnline -Force -ErrorAction SilentlyContinue
+                Write-Host " - Disconnected from MSOnline" -ForegroundColor DarkYellow
+                Write-Host
+            }
+            catch {
+                Write-Warning "Failed to disconnect from MSOnline: $_"
+            }
+        }
+        elseif ($connection -match "Microsoft Teams") {
+            try {
+                Disconnect-MicrosoftTeams -Confirm:$false
+                Write-Host " - Disconnected from Microsoft Teams" -ForegroundColor DarkYellow
+                Write-Host
+            }
+            catch {
+                Write-Warning "Failed to disconnect from Microsoft Teams: $_"
+            }
+        }
+        elseif ($connection -match "SharePoint Online") {
+            try {
+                Disconnect-SPOService
+                Write-Host " - Disconnected from SharePoint Online" -ForegroundColor DarkYellow
+                Write-Host
+            }
+            catch {
+                Write-Warning "Failed to disconnect from SharePoint Online: $_"
+            }
+        }
+        elseif ($connection -match "Microsoft.Graph") {
+            try {
+                Disconnect-MgGraph
+                Write-Host " - Disconnected from Microsoft.Graph" -ForegroundColor DarkYellow
+                Write-Host
+            }
+            catch {
+                Write-Warning "Failed to disconnect from Microsoft.Graph: $_"
+            }
+        }
+        elseif ($connection -match "AIPService") {
+            try {
+                Disconnect-AipService
+                Write-Host " - Disconnected from AIPService" -ForegroundColor DarkYellow
+                Write-Host
+            }
+            catch {
+                Write-Warning "Failed to disconnect from AIPService: $_"
+            }
+        }
     }
 }
 
@@ -346,7 +436,7 @@ $config = Load-Configuration
 do {
     Write-Host
     Write-Host
-    Write-Host "Please be patient as we check for connections..."
+    Write-Host "Checking for connections..."
     Write-Host
 
     Prompt-ExistingConnections
@@ -368,15 +458,19 @@ do {
             # Combine-LogFiles # Gotta fix this
             
             # Terminating Module Connections
+            Write-Host
             Write-Host "Disconnecting all sessions" -ForegroundColor Yellow
+            Write-Host
             try {
+                Close-ExistingConnections $Global:existingConnections
+                $Global:existingConnections = $null
                 $Global:Credential = $null
+                $Global:Modules = $null
                 Get-PSSession | Remove-PSSession -ErrorAction SilentlyContinue
-                Disconnect-AzureAD -ErrorAction SilentlyContinue
-                Write-Log "Existing connections have been closed." "INFO"
+                Write-Log "Connections have been closed." "INFO"
             } 
             catch {
-                Write-Log "Existing connections have been closed." "INFO"
+                Write-Log "Connections have been closed." "INFO"
             }
             return
         }
