@@ -107,10 +107,10 @@ function Connect-AllServices {
         @{Name = "Exchange Online"; Cmd = { Connect-ExchangeOnline -UserPrincipalName $Global:Credential.UserName } },
 
         # Security Compliance Center
-        @{Name = "Security & Compliance Center"; Cmd = { Connect-IPPSSession -UserPrincipalName $Global:Credential.UserName -UseRPSSession:$false } },
+        @{Name = "Security and Compliance"; Cmd = { Connect-IPPSSession -UserPrincipalName $Global:Credential.UserName -UseRPSSession:$false } },
 
         # NEW Graph API
-        @{Name = "Microsoft Graph"; Cmd = { 
+        @{Name = "MG Graph"; Cmd = { 
                 $Scopes = @(
                     "User.ReadWrite.All"
                     "Group.ReadWrite.All"
@@ -138,31 +138,30 @@ function Connect-AllServices {
         },
 
         # Microsoft Online MSOL
-        @{Name = "Microsoft Online"; Cmd = { Connect-MsolService } },
+        @{Name = "MSOnline"; Cmd = { Connect-MsolService } },
 
         # Azure AD
-        @{Name = "Azure AD Preview"; Cmd = { Connect-AzureAD } },
+        @{Name = "Azure AD"; Cmd = { Connect-AzureAD } },
 
         # Information Protection
-        @{Name = "Azure Information Protection"; Cmd = { Connect-AipService } },
+        @{Name = "AIPService"; Cmd = { Connect-AipService } },
 
         # Teams Admin
-        @{Name = "Microsoft Teams"; Cmd = { Connect-MicrosoftTeams } },
+        @{Name = "Teams"; Cmd = { Connect-MicrosoftTeams } },
 
         # SharePoint Admin
-        @{Name = "SharePoint Online"; Cmd = { 
+        @{Name = "SharePoint"; Cmd = { 
                 Connect-SPOService -Url "https://$Global:TenantDomain-admin.sharepoint.com"
             }
         }
     )
 
     foreach ($module in $connectionModules) {
-        # Gotta fix connection Checking
-        #$isConnected = Test-ServiceConnection -ServiceName $module.Name
-        $isConnected = $Global:existingConnections -contains $module.Name
-        
+        # Check if the module is already connected
+        $isConnected = $Global:existingConnections | Select-String -Pattern $module.Name
+    
         if ($isConnected) {
-            Write-Host "$($module.Name) Connected" -ForegroundColor Green
+            Write-Host "$($module.Name) Connected!" -ForegroundColor DarkGreen
             $connectionSummary += [PSCustomObject]@{
                 Module = $module.Name
                 Status = "Connected"
@@ -172,7 +171,7 @@ function Connect-AllServices {
             try {
                 & $module.Cmd # Connection Magic
                 Write-Log "$($module.Name) Connected" "INFO"
-                Write-Host "$($module.Name) Connected!" -ForegroundColor Green
+                Write-Host "$($module.Name) Connected! (new)" -ForegroundColor DarkGreen
                 Start-Sleep 3 # Wait needed for successful connections...
                 $connectionSummary += [PSCustomObject]@{
                     Module = $module.Name
@@ -225,15 +224,17 @@ $connectionSummary = Connect-AllServices $Global:Credential
 
 # Display connection summary
 Write-Host
-Write-Host -ForegroundColor DarkGreen "Module Connections Complete. Service Connection Summary:"
+Write-Host -ForegroundColor Green "Module Connections Complete. Service Connection Summary:"
 $connectionSummary | Format-Table -AutoSize
 
 # More Info
 Write-Host
+Write-Host "IMPORTANT" -ForegroundColor Cyan
 Write-Host "Please double check and make there are absolutely NO errors." -ForegroundColor Cyan
 Write-Host "You may re-run this as many times as needed until all modules are successfully connected" -ForegroundColor Cyan
 Write-Host
 Write-Host "=== If you continue seeing errors for a problematic module: " -ForegroundColor Yellow
-Write-Host " - Open a new PowerShell Window as Admin and attempt to connect the module manualy" -ForegroundColor Yellow
+Write-Host " - Open a new PowerShell Window as Admin and attempt to connect the module manually" -ForegroundColor Yellow
+Write-Host " - You can use the 'R' menu option to Refresh Connections to verify if you have successfully connected all modules" -ForegroundColor Yellow
 Write-Host
 Write-Log "M365 Module Connector Log $logFile" "INFO"
