@@ -237,19 +237,18 @@ function Update-Modules {
 ##############################################################################
 
 Write-Log "Starting M365 Module Updater" "INFO"
-Write-Host
-Write-Host
-Write-Host "Checking for Installed Modules..."
 
-# List of modules to install/update
+# List of modules to Remove/Install/Update
 $installedModules = Get-InstalledModule * | Select-Object -ExpandProperty Name
 $FullModuleList = $Global:Modules += $installedModules
 $FullModuleList = $FullModuleList | Sort-Object -Unique
-Write-Host
-Write-Host "Installing Required M365 Modules and Updating All PS Modules..."
-Write-Host
+$FullModuleList = $FullModuleList | Where-Object { $_ -notin $ModuleBlacklist }
 
-# Remove
+Write-Host
+Write-Host
+Write-Host "Checking for Installed Modules..." -ForegroundColor Yellow
+
+# Remove Modules
 foreach ($Module in $ModuleBlacklist) {
     if (![string]::IsNullOrEmpty($Module)) {
         Write-Host
@@ -257,7 +256,10 @@ foreach ($Module in $ModuleBlacklist) {
     }
 }
 
-# Install/Update
+Write-Host
+Write-Host "Installing Required M365 Modules and Updating All PS Modules..." -ForegroundColor Yellow
+
+# Install/Update Modules
 foreach ($Module in $FullModuleList) {
     if (![string]::IsNullOrEmpty($Module)) {
         Write-Host
@@ -266,13 +268,15 @@ foreach ($Module in $FullModuleList) {
     }
 }
 
-# Display summary
-Write-Log "Module Installation/Update Summary:" "INFO"
-$modulesSummary | Format-Table -AutoSize
-
 Write-Host
 Write-Host -ForegroundColor Green "Module Updates Complete."
-Write-Host "Please double check and make there are no errors and you are running Exchange Online Management Module version 3.2.0 and NOT the latest version." -ForegroundColor Yellow
-Write-Host "You may re-run this as many times as needed until all modules are correctly installed. If you continue seeing errors for the same module, restart your PC." -ForegroundColor Yellow
+Write-Host
+Write-Host "Please double check and make there are absolutely NO errors." -ForegroundColor Cyan
+Write-Host "You may re-run this as many times as needed until all modules are correctly installed." -ForegroundColor Cyan
+Write-Host
+Write-Host "=== If you continue seeing errors for a problematic module: " -ForegroundColor Yellow
+Write-Host " - Restart your PC. You can try to use 'Uninstall-Module xxx -RequiredVersion ... ' to remove modules in another powershell admin window" -ForegroundColor Yellow
+Write-Host " - Try running this script as a last resort to obliterate any busted modules: " -ForegroundColor Yellow
+Write-Host " PSModuleTerminator https://github.com/Exploitacious/Windows_Toolz/tree/main/Production/General/PSModuleTerminator" -ForegroundColor Yellow
 Write-Host
 Write-Log "M365 Module Updater Log $logFile" "INFO"

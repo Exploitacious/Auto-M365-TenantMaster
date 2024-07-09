@@ -318,22 +318,20 @@ function Prompt-ExistingConnections {
     else {
         Write-Host
         Write-Host
-        Write-Log "No existing tenant connections detected." "INFO"
+        Write-Log "No existing tenant connections detected." "WARNING"
     }
 
     # Admin/Tenant in Use
     if ($null -eq $Global:Credential) {
-        Write-Host
         Write-Log "No Admin Account being used" "WARNING"
     }
     else {
         #Set Tenant Domain
         $Global:TenantDomain = $Global:Credential.UserName.Split('@')[1].Split('.')[0]
+        Write-Log "Connected to $Global:TenantDomain with $($Global:Credential.UserName)" "INFO"
         Write-Host
-        Write-Log "$Global:TenantDomain $($Global:Credential.UserName) account in use" "INFO"
-        Write-Host
-        Write-Host "Tenant Domain: $Global:TenantDomain" -ForegroundColor Green
-        Write-Host "Credential: $($Global:Credential.UserName)" -ForegroundColor Green
+        Write-Host "-= Tenant Domain: $Global:TenantDomain" -ForegroundColor Green
+        Write-Host "-=== Credential: $($Global:Credential.UserName)" -ForegroundColor Green
     }
 }
 
@@ -350,7 +348,9 @@ do {
     Write-Host
     Write-Host "Please be patient as we check for connections..."
     Write-Host
+
     Prompt-ExistingConnections
+    
     Write-Host
     Write-Host
     Show-Menu
@@ -369,11 +369,15 @@ do {
             
             # Terminating Module Connections
             Write-Host "Disconnecting all sessions" -ForegroundColor Yellow
-            $Global:Credential = $null
-            Get-PSSession | Remove-PSSession -ErrorAction SilentlyContinue
-            Disconnect-AzureAD -ErrorAction SilentlyContinue
-            Write-Log "Existing connections have been closed." "INFO"
-                
+            try {
+                $Global:Credential = $null
+                Get-PSSession | Remove-PSSession -ErrorAction SilentlyContinue
+                Disconnect-AzureAD -ErrorAction SilentlyContinue
+                Write-Log "Existing connections have been closed." "INFO"
+            } 
+            catch {
+                Write-Log "Existing connections have been closed." "INFO"
+            }
             return
         }
     }
