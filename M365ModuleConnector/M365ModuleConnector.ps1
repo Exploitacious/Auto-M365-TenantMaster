@@ -161,7 +161,7 @@ function Connect-AllServices {
         $isConnected = $Global:existingConnections | Select-String -Pattern $module.Name
     
         if ($isConnected) {
-            Write-Host "$($module.Name) Connected!" -ForegroundColor DarkGreen
+            Write-Host "$($module.Name) Connected" -ForegroundColor DarkGreen
             $connectionSummary += [PSCustomObject]@{
                 Module = $module.Name
                 Status = "Connected"
@@ -171,7 +171,7 @@ function Connect-AllServices {
             try {
                 & $module.Cmd # Connection Magic
                 Write-Log "$($module.Name) Connected" "INFO"
-                Write-Host "$($module.Name) Connected! (new)" -ForegroundColor DarkGreen
+                Write-Host "$($module.Name) Connected!" -ForegroundColor DarkGreen
                 Start-Sleep 3 # Wait needed for successful connections...
                 $connectionSummary += [PSCustomObject]@{
                     Module = $module.Name

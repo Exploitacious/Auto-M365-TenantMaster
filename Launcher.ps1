@@ -1,4 +1,5 @@
 ### M365 Configuration Launcher
+
 # Verify/Elevate Admin Session.
 if (!([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")) { 
     Start-Process powershell.exe "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
@@ -103,8 +104,7 @@ function Show-Menu {
     Write-Host "3: Configure M365 Tenant and Exchange Online"
     Write-Host "4: Configure ATP (Advanced Threat Protection)"
     Write-Host "5: Configure DLP (Data Loss Prevention)"
-    Write-Host "6: Run All Configurations"
-    Write-Host "Q: Terminate Connections and Quit"
+    Write-Host "Q: Quit - Consolidate logs, Disconnect Sessions"
     Write-Host
 }
 
@@ -513,7 +513,7 @@ do {
         '4' { Run-Script $config.ScriptPaths.ATPConfig "ATP Configuration" }
         '5' { Run-Script $config.ScriptPaths.DLPConfig "DLP Configuration" }
         'q' { 
-            Write-Log "Exiting script..." "INFO"
+            Write-Log "Wrapping up, please be patient..." "INFO"
             Write-Host
             Close-ExistingConnections
             $Global:existingConnections = $null
@@ -526,4 +526,7 @@ do {
 }
 until ($input -eq 'q')
 
+Write-Host
+Write-Host "Use the log to extract information regarding the work completed for work/time/ticket entry"
+Write-Host
 Read-Host "Press any key to exit"
