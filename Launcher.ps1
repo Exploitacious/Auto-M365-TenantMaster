@@ -365,22 +365,23 @@ function Prompt-ExistingConnections {
         } 
         Write-Log "Established Creds to $Global:TenantDomain with $($Global:Credential.UserName)" "INFO"
         Write-Host
+        Write-Host "Global Variables" -ForegroundColor  DarkGreen
         Write-Host " -= Tenant Domain: $Global:TenantDomain" -ForegroundColor DarkGreen
         Write-Host " -= Tenant ID : $Global:TenantID" -ForegroundColor  DarkGreen
         Write-Host " -= Credential: $($Global:Credential.UserName)" -ForegroundColor  DarkGreen
     }
 
-    # Check if all necessary connections are established
-    $connectionCheck = Check-AllNecessaryConnections
-    if ($connectionCheck -eq $true) {
+    # Check if all necessary connections are established and set global variable
+    $Global:connectionCheck = Check-AllNecessaryConnections
+    if ($Global:connectionCheck -eq $true) {
         Write-Host
-        Write-Host " All necessary connections established. Proceed with Configuration!" -ForegroundColor Green
+        Write-Host " All necessary connections are established! Proceed with Configuration." -ForegroundColor Green
     }
     else {
         Write-Host
         Write-Host
         Write-Host "Some required module connections are missing:" -ForegroundColor Yellow
-        $connectionCheck | ForEach-Object { Write-Host " - $_" -ForegroundColor Yellow }
+        $Global:connectionCheck | ForEach-Object { Write-Host " - $_" -ForegroundColor Yellow }
     }
 }
 

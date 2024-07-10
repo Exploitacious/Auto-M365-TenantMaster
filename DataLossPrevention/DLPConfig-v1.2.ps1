@@ -480,3 +480,78 @@ if ($Answer -eq 'y' -or $Answer -eq 'yes') {
 
 
 #>
+
+
+# Connect to Security & Compliance Center PowerShell
+try {
+   Connect-IPPSSession
+}
+catch {
+   Write-Error "Failed to connect to Security & Compliance Center. Error: $_"
+   exit
+}
+
+# Function to create or update a label
+function Set-SensitivityLabel {
+   param (
+      [string]$Name,
+      [string]$DisplayName,
+      [string]$Tooltip
+   )
+   try {
+      $label = Get-Label -Identity $Name -ErrorAction SilentlyContinue
+      if ($label) {
+         Set-Label -Identity $Name -DisplayName $DisplayName -Tooltip $Tooltip
+         Write-Host "Updated existing label: $Name"
+      }
+      else {
+         New-Label -Name $Name -DisplayName $DisplayName -Tooltip $Tooltip
+         Write-Host "Created new label: $Name"
+      }
+   }
+   catch {
+      Write-Error "Failed to create/update label $Name. Error: $_"
+   }
+}
+
+# Create or update sensitivity labels
+$labels = @(
+   @{Name = "Public"; DisplayName = "Public"; Tooltip = "Information that can be freely shared" },
+   @{Name = "Internal"; DisplayName = "Internal"; Tooltip = "For internal use only" },
+   @{Name = "Confidential"; DisplayName = "Confidential"; Tooltip = "Sensitive information, limited distribution" },
+   @{Name = "Highly Confidential"; DisplayName = "Highly Confidential"; Tooltip = "Extremely sensitive information" }
+)
+
+foreach ($label in $labels) {
+   Set-SensitivityLabel @label
+}
+
+# Create or update label policy
+$policyName = "Default Sensitivity Label Policy"
+try {
+   $policy = Get-LabelPolicy -Identity $policyName -ErrorAction SilentlyContinue
+   if ($policy) {
+      Set-LabelPolicy -Identity $policyName -AdvancedSettings @{AttachmentAction = "Automatic" }
+      Write-Host "Updated existing policy: $policyName"
+   }
+   else {
+      New-LabelPolicy -Name $policyName -Labels $labels.Name -Settings @{mandatory = $false; defaultlabelid = "Internal" }
+      Set-LabelPolicy -Identity $policyName -AdvancedSettings @{AttachmentAction = "Automatic" }
+      Write-Host "Created new policy: $policyName"
+   }
+}
+catch {
+   Write-Error "Failed to create/update policy $policyName. Error: $_"
+}
+
+# Configure SharePoint and OneDrive integration
+try {
+   Set-SPOTenant -EnableAIPIntegration $true
+   Set-SPOTenant -EnableSensitivityLabelInOffice $true
+   Write-Host "Configured SharePoint and OneDrive integration"
+}
+catch {
+   Write-Error "Failed to configure SharePoint and OneDrive integration. Error: $_"
+}
+
+Write-Host "Sensitivity labeling configuration complete."
