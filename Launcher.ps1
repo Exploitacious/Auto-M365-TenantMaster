@@ -357,7 +357,12 @@ function Prompt-ExistingConnections {
     else {
         #Set Tenant Domain and ID
         $Global:TenantDomain = $Global:Credential.UserName.Split('@')[1].Split('.')[0]
-        $Global:TenantID = (Get-CsTenant).TenantId
+        try {
+            $Global:TenantID = (Get-CsTenant).TenantId
+        }
+        catch {
+            $Global:TenantID = "CRITICAL ERROR"
+        } 
         Write-Log "Established Creds to $Global:TenantDomain with $($Global:Credential.UserName)" "INFO"
         Write-Host
         Write-Host " -= Tenant Domain: $Global:TenantDomain" -ForegroundColor DarkGreen
