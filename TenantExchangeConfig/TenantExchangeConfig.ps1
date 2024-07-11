@@ -20,8 +20,16 @@ catch {
 
 # Initialize variables
 $scriptPath = $PSScriptRoot
+$parentDir = Split-Path $scriptPath -Parent
 $logFile = Join-Path $scriptPath "TenantExchangeConfig_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
-$configFile = Join-Path $scriptPath "config.json"
+
+# Check parent directory
+if ((Split-Path $parentDir -Leaf) -ne "Auto-M365-TenantMaster") {
+    throw "The parent directory must be Auto-M365-TenantMaster."
+}
+
+# Construct the path to the config file in the parent directory
+$configFile = Join-Path $parentDir "config.json"
 
 function Verify-ServiceConnections {
     # Check Global Variables and Status
@@ -33,6 +41,7 @@ function Verify-ServiceConnections {
     }
     else {
         Write-Host " -= Tenant ID : $Global:TenantID" -ForegroundColor  DarkGreen
+        $TenantID = $Global:TenantID
     }
     #TenantDomain
     if ($null -eq $Global:TenantDomain) {
@@ -41,6 +50,7 @@ function Verify-ServiceConnections {
     }
     else {
         Write-Host " -= Tenant Domain: $Global:TenantDomain" -ForegroundColor DarkGreen
+        $TenantDomain = $Global:TenantDomain
     }
     #Credential
     if ($null -eq $Global:Credential) {
@@ -83,35 +93,7 @@ function Load-Configuration {
         $config = Get-Content $configFile | ConvertFrom-Json
     }
     else {
-        Write-Log "Configuration file not found. Generating new one with default values.." "WARNING"
-        Write-Host
-        $mspName = Read-Host "Enter a one-word name of your MSP (Example: Umbrella)"
-        Write-Host
-
-        $config = @{
-            GlobalAdminUPN             = $Global:Credential.UserName
-            AuditLogAgeLimit           = 730
-            MSPName                    = $mspName
-            GroupCreatorsGroupName     = "Group Creators"
-            ExcludeFromCAGroupName     = "Exclude From CA"
-            DevicePilotGroupName       = "Pilot-DeviceCompliance"
-            AllowedAutoForwardingGroup = "AutoForwarding-Allowed"
-            BreakGlassAccountPass      = "Powershellisbeast8442!"
-            AdminAccessToMailboxes     = $true
-            DisableFocusedInbox        = $true
-            DeleteStaleDevices         = $true
-            StaleDeviceThresholdDays   = 90
-            DisableSecurityDefaults    = $true
-            Language                   = "en-US"
-            Timezone                   = "Eastern Standard Time"
-        }
-        $Config | ConvertTo-Json | Out-File "$scriptPath\config.json"
-
-        # Optional Exit / Confirmation
-        Write-Host "A new config file has been generated and placed at script root."
-        Write-Host "The password for your BreakGlass account will be 'Powershellisbeast8442!'" -ForegroundColor DarkGreen
-        Read-Host "Press any button to continue, or exit script (Ctrl-C) to set up your own config file (See Readme)"
-
+        throw "Configuration file not found. Unable to proceed without config file in the Launcher directory."
     }
     return $config
 }
@@ -224,7 +206,7 @@ function Set-ExchangeOnlineConfig {
 
         # Create or update the allow list for admin users (for external sender tags)
         $allowList = (Get-ExternalInOutlook).AllowList
-        $adminUsers = @($Config.GlobalAdminUPN, "$($Config.MSPName)BG@$((Get-AzureADTenantDetail).VerifiedDomains[0].Name)")
+        $adminUsers = @($($Global:Credential.UserName), $Global:breakGlassUPN)
 
         foreach ($user in $adminUsers) {
             if ($user -notin $allowList) {
@@ -255,15 +237,41 @@ function Set-AzureADConfig {
     param ($Config)
     try {
         Write-Log "Starting Azure AD configuration" "INFO"
+
+        # Enable or Disable Security Defaults
+        try {
+            # Get current security defaults status
+            $securityDefaults = Get-MgPolicyIdentitySecurityDefaultEnforcementPolicy
+        
+            # Check if the current state matches the desired state
+            if ($securityDefaults.IsEnabled -eq !$Config.DisableSecurityDefaults) {
+                Write-Log "Security Defaults are already in the desired state (Enabled: $(!$Config.DisableSecurityDefaults))" "INFO"
+            }
+            else {
+                # Prepare the parameters for updating security defaults
+                $params = @{
+                    IsEnabled = !$Config.DisableSecurityDefaults
+                }
+        
+                # Update security defaults
+                Update-MgPolicyIdentitySecurityDefaultEnforcementPolicy -BodyParameter $params
+        
+                $action = if ($Config.DisableSecurityDefaults) { "disabled" } else { "enabled" }
+                Write-Log "Security Defaults have been $action" "INFO"
+            }
+        }
+        catch {
+            Write-Log "Error configuring Security Defaults: $($_.Exception.Message)" "ERROR"
+            Write-Log "Error details: $($_.Exception.StackTrace)" "ERROR"
+        }
                 
         # Create Break-Glass Account
-        $breakGlassUPN = "$($Config.MSPName)BG@$((Get-AzureADTenantDetail).VerifiedDomains[0].Name)"
-        if (!(Get-AzureADUser -Filter "UserPrincipalName eq '$breakGlassUPN'")) {
+        if (!(Get-AzureADUser -Filter "UserPrincipalName eq '$Global:breakGlassUPN'")) {
             Write-Log "Creating Break-Glass account" "INFO"
             $PasswordProfile = New-Object -TypeName Microsoft.Open.AzureAD.Model.PasswordProfile
             $PasswordProfile.Password = $Config.BreakGlassAccountPass
-            New-AzureADUser -AccountEnabled $True -DisplayName "$($Config.MSPName) Break-Glass" -PasswordProfile $PasswordProfile -MailNickName "$($Config.MSPName)BG" -UserPrincipalName $breakGlassUPN
-            $bgUser = Get-AzureADUser -ObjectId $breakGlassUPN
+            New-AzureADUser -AccountEnabled $True -DisplayName "$($Config.MSPName) Break-Glass" -PasswordProfile $PasswordProfile -MailNickName "$($Config.MSPName)BG" -UserPrincipalName $Global:breakGlassUPN
+            $bgUser = Get-AzureADUser -ObjectId $Global:breakGlassUPN
             $role = Get-AzureADDirectoryRole | Where-Object { $_.displayName -eq 'Global Administrator' }
             Add-AzureADDirectoryRoleMember -ObjectId $role.ObjectId -RefObjectId $bgUser.ObjectId
             Write-Log "Break-Glass account created and added to Global Administrator role" "INFO"
@@ -273,10 +281,10 @@ function Set-AzureADConfig {
         }
 
         # Ensure admin users are properly defined
-        $adminUsers = @($Config.GlobalAdminUPN, $breakGlassUPN) | Where-Object { $_ -ne $null -and $_ -ne '' }
-        if ($adminUsers.Count -eq 0) {
-            Write-Log "No valid admin users defined. Check GlobalAdminUPN and breakGlassUPN in the configuration." "ERROR"
-            throw "No valid admin users defined"
+        $adminUsers = @($($Global:Credential.UserName), $Global:breakGlassUPN) | Where-Object { $_ -ne $null -and $_ -ne '' }
+        if ($adminUsers.Count -lt 2) {
+            Write-Log "Admin users not properly defined. Check GlobalAdminUPN and breakGlassUPN in the configuration." "ERROR"
+            throw "Admin users not properly defined"
         }
 
         # Delete old devices if configured
@@ -404,7 +412,7 @@ function Set-AzureADConfig {
 
         # Add Admin Users to Groups
         Write-Log "Adding admin users to groups" "INFO"
-        $adminUsers = @($Config.GlobalAdminUPN, "$($Config.MSPName)BG@$((Get-AzureADTenantDetail).VerifiedDomains[0].Name)")
+        $adminUsers = @($($Global:Credential.UserName), $Global:breakGlassUPN)
         foreach ($user in $adminUsers) {
             $azureADUser = Get-AzureADUser -ObjectId $user
 
@@ -520,7 +528,7 @@ function Set-AzureADConfig {
         # Grant Admin Access to All Mailboxes
         if ($Config.AdminAccessToMailboxes) {
             Write-Log "Granting admin access to all mailboxes" "INFO"
-            Get-Mailbox -ResultSize Unlimited | Add-MailboxPermission -User $Config.GlobalAdminUPN -AccessRights FullAccess -InheritanceType All -AutoMapping $false
+            Get-Mailbox -ResultSize Unlimited | Add-MailboxPermission -User $($Global:Credential.UserName) -AccessRights FullAccess -InheritanceType All -AutoMapping $false
             Write-Log "Admin granted access to all mailboxes" "INFO"
         }
 
@@ -544,6 +552,39 @@ function Set-AzureADConfig {
         else {
             Write-Log "Group Creators group not found. Skipping group creation restriction." "WARNING"
         }
+
+        # Setup Email Forwarding for Global Admin
+        Write-Log "Setting up email forwarding for Global Admin" "INFO"
+        try {
+            # Get the current mailbox settings
+            $mailbox = Get-Mailbox -Identity $($Global:Credential.UserName) -ErrorAction Stop
+
+            if ($mailbox.ForwardingAddress -eq $Config.MSPAlertsAddress -and $mailbox.DeliverToMailboxAndForward -eq $true) {
+                Write-Log "Email forwarding is already correctly configured for $($Global:Credential.UserName)" "INFO"
+            }
+            else {
+                # Configure forwarding
+                Set-Mailbox -Identity $($Global:Credential.UserName) -ForwardingAddress $Config.MSPAlertsAddress -DeliverToMailboxAndForward $true -ErrorAction Stop
+                Write-Log "Email forwarding configured for $($Global:Credential.UserName) to $($Config.MSPAlertsAddress)" "INFO"
+            }
+
+            # Disable junk email rule
+            $junkRule = Get-MailboxJunkEmailConfiguration -Identity $($Global:Credential.UserName) -ErrorAction Stop
+            if ($junkRule.Enabled) {
+                Set-MailboxJunkEmailConfiguration -Identity $($Global:Credential.UserName) -Enabled $false -ErrorAction Stop
+                Write-Log "Junk email rule disabled for $($Global:Credential.UserName)" "INFO"
+            }
+            else {
+                Write-Log "Junk email rule is already disabled for $($Global:Credential.UserName)" "INFO"
+            }
+
+            Write-Log "Email forwarding setup completed successfully" "INFO"
+        }
+        catch {
+            Write-Log "Error setting up email forwarding: $($_.Exception.Message)" "ERROR"
+            Write-Log "Error details: $($_.Exception.StackTrace)" "ERROR"
+        }
+
         Write-Host
         Write-Log "Azure AD configuration completed successfully" "INFO"
     }
@@ -590,27 +631,25 @@ function Set-TeamsConfiguration {
         Write-Log "Configuring Microsoft Teams settings" "INFO"
         
         # Set default team and channel settings
-        Set-CsTeamsChannelsPolicy -Identity Global -AllowOrgWideTeamCreation $false
+        Set-CsTeamsChannelsPolicy -Identity Global -AllowOrgWideTeamCreation $config.TeamsConfig.AllowOrgWideTeamCreation
         Write-Log "Disabled creation of Org-Wide Teams" "INFO"
 
         # Configure external access
-        Set-CsTenantFederationConfiguration -AllowFederatedUsers $true -AllowTeamsConsumer $false -AllowTeamsConsumerInbound $false
+        Set-CsTenantFederationConfiguration -AllowFederatedUsers $Config.TeamsConfig.AllowFederatedUsers -AllowTeamsConsumer $config.TeamsConfig.AllowTeamsConsumer -AllowTeamsConsumerInbound $config.TeamsConfig.AllowTeamsConsumerInbound
         Write-Log "Only Federated B2B Guests allowed in Teams" "INFO"
 
         # Configure guest access
-        Set-CsTeamsClientConfiguration -Identity Global -AllowGuestUser $true
-        Set-CsTeamsMeetingConfiguration -Identity Global -DisableAnonymousJoin $true
+        Set-CsTeamsClientConfiguration -Identity Global -AllowGuestUser $config.TeamsConfig.AllowGuestAccess
+        Set-CsTeamsMeetingConfiguration -Identity Global -DisableAnonymousJoin $config.TeamsConfig.DisableAnonymousJoin
         Write-Log "Block Anonymous guests in Teams" "INFO"
         
         # Additional client configuration settings
-        Set-CsTeamsClientConfiguration -Identity Global -AllowBox $false -AllowDropBox $false -AllowEgnyte $false -AllowEmailIntoChannel $true -AllowGoogleDrive $false
+        Set-CsTeamsClientConfiguration -Identity Global -AllowBox $config.TeamsConfig.AllowBox -AllowDropBox $config.TeamsConfig.AllowDropBox -AllowEgnyte $config.TeamsConfig.AllowEgnyte -AllowEmailIntoChannel $config.TeamsConfig.AllowEmailIntoChannel -AllowGoogleDrive $config.TeamsConfig.AllowGoogleDrive
         Write-Log "Blocked consumer service providers" "INFO"
 
-        <# Future Expansion:
-        Set-CsTeamsMeetingConfiguration
-        -LogoURL **URL**
+        # Set Logo for Meeting Invites
+        Set-CsTeamsMeetingConfiguration -Identity Global -LogoURL $config.LogoURL
         
-        #>
         Write-Log "Microsoft Teams configuration completed" "INFO"
     }
     catch {
@@ -632,15 +671,15 @@ function Set-SharePointOneDriveConfig {
         Write-Log "Configuring SharePoint and OneDrive settings" "INFO"
 
         # Set default storage limits
-        Set-SPOTenant -OneDriveStorageQuota 1048576
+        Set-SPOTenant -OneDriveStorageQuota $config.SharePointOneDriveConfig.OneDriveStorageQuota
         Write-Log "Set SP/OD Quota to 10GB" "INFO"
 
         # Configure external sharing settings
-        Set-SPOTenant -SharingCapability ExternalUserAndGuestSharing -DefaultSharingLinkType Internal -PreventExternalUsersFromResharing $true
+        Set-SPOTenant -SharingCapability $config.SharePointOneDriveConfig.SharingCapability -DefaultSharingLinkType $config.SharePointOneDriveConfig.DefaultSharingLinkType -PreventExternalUsersFromResharing $config.SharePointOneDriveConfig.PreventExternalUsersFromResharing
         Write-Log "Set Tenant Sharing Permission Defaults" "INFO"
 
         # Configure BCC on Sharing to Admin Mailbox
-        Set-SPOTenant -BccExternalSharingInvitations $true -BccExternalSharingInvitationsList $Config.GlobalAdminUPN
+        Set-SPOTenant -BccExternalSharingInvitations $config.SharePointOneDriveConfig.BccExternalSharingInvitations -BccExternalSharingInvitationsList $($Global:Credential.UserName)
         Write-Log "Set BCC for external sharing to Admin Account" "INFO"
 
         <# Future Expandability
@@ -659,73 +698,74 @@ function Set-SharePointOneDriveConfig {
 # # # Configure basic compliance policies
 function Set-RetentionPolicies {
     param ($Config)
+    # Configure Compliance Policies
+    Write-Log "Configuring Compliance Policies" "INFO"
+
+    # Email Retention Policy
     try {
-        Write-Log "Configuring basic compliance policies" "INFO"
+        $emailRetentionYears = $Config.CompliancePolicies.EmailRetentionYears
+        $emailRetentionDays = $emailRetentionYears * 365
 
-        # Set up retention policy for email
-        try {
-            New-RetentionCompliancePolicy -Name "Email 10 Year Retention" -ExchangeLocation All -ErrorAction Stop
-            Write-Log "Created Email 10 Year Retention policy" "INFO"
-        }
-        catch {
-            if ($_.Exception.Message -like "*already exists*") {
-                Write-Log "Email 10 Year Retention policy already exists. Skipping creation." "INFO"
-            }
-            else {
-                throw
-            }
-        }
-
-        try {
-            New-RetentionComplianceRule -Name "Email 10 Year Retention Rule" -Policy "Email 10 Year Retention" -RetentionDuration 3650 -RetentionComplianceAction Keep -ErrorAction Stop
-            Write-Log "Created Email 10 Year Retention Rule" "INFO"
-        }
-        catch {
-            if ($_.Exception.Message -like "*already exists*") {
-                Write-Log "Email 10 Year Retention Rule already exists. Skipping creation." "INFO"
-            }
-            else {
-                throw
-            }
-        }
-
-        Write-Log "Set E-Mail Retention Policies to 10 Years" "INFO"
-
-        # Set up retention policy for SharePoint and OneDrive
-        try {
-            New-RetentionCompliancePolicy -Name "SharePoint and OneDrive 10 Year Retention" -SharePointLocation All -OneDriveLocation All -ErrorAction Stop
-            Write-Log "Created SharePoint and OneDrive 10 Year Retention policy" "INFO"
-        }
-        catch {
-            if ($_.Exception.Message -like "*already exists*") {
-                Write-Log "SharePoint and OneDrive 10 Year Retention policy already exists. Skipping creation." "INFO"
-            }
-            else {
-                throw
-            }
-        }
-
-        try {
-            New-RetentionComplianceRule -Name "SP/OD 10 Year Retention Rule" -Policy "SharePoint and OneDrive 10 Year Retention" -RetentionDuration 3650 -RetentionComplianceAction Keep -ErrorAction Stop
-            Write-Log "Created SP/OD 10 Year Retention Rule" "INFO"
-        }
-        catch {
-            if ($_.Exception.Message -like "*already exists*") {
-                Write-Log "SP/OD 10 Year Retention Rule already exists. Skipping creation." "INFO"
-            }
-            else {
-                throw
-            }
-        }
-
-        Write-Log "Set SharePoint and OneDrive Retention Policies to 10 Years" "INFO"
-
-        Write-Log "Basic compliance policies configuration completed" "INFO"
+        New-RetentionCompliancePolicy -Name "Email $emailRetentionYears Year Retention" -ExchangeLocation All -ErrorAction Stop
+        Write-Log "Created Email $emailRetentionYears Year Retention policy" "INFO"
     }
     catch {
-        Write-Log "Error configuring compliance policies: $($_.Exception.Message)" "ERROR"
-        throw
+        if ($_.Exception.Message -like "*already exists*") {
+            Write-Log "Email $emailRetentionYears Year Retention policy already exists. Skipping creation." "INFO"
+        }
+        else {
+            Write-Log "Error creating Email $emailRetentionYears Year Retention policy: $($_.Exception.Message)" "ERROR"
+            throw
+        }
     }
+
+    try {
+        New-RetentionComplianceRule -Name "Email $emailRetentionYears Year Retention Rule" -Policy "Email $emailRetentionYears Year Retention" -RetentionDuration $emailRetentionDays -RetentionComplianceAction Keep -ErrorAction Stop
+        Write-Log "Created Email $emailRetentionYears Year Retention Rule" "INFO"
+    }
+    catch {
+        if ($_.Exception.Message -like "*already exists*") {
+            Write-Log "Email $emailRetentionYears Year Retention Rule already exists. Skipping creation." "INFO"
+        }
+        else {
+            Write-Log "Error creating Email $emailRetentionYears Year Retention Rule: $($_.Exception.Message)" "ERROR"
+            throw
+        }
+    }
+
+    # SharePoint and OneDrive Retention Policy
+    try {
+        $spodRetentionYears = $Config.CompliancePolicies.SharePointOneDriveRetentionYears
+        $spodRetentionDays = $spodRetentionYears * 365
+
+        New-RetentionCompliancePolicy -Name "SharePoint and OneDrive $spodRetentionYears Year Retention" -SharePointLocation All -OneDriveLocation All -ErrorAction Stop
+        Write-Log "Created SharePoint and OneDrive $spodRetentionYears Year Retention policy" "INFO"
+    }
+    catch {
+        if ($_.Exception.Message -like "*already exists*") {
+            Write-Log "SharePoint and OneDrive $spodRetentionYears Year Retention policy already exists. Skipping creation." "INFO"
+        }
+        else {
+            Write-Log "Error creating SharePoint and OneDrive $spodRetentionYears Year Retention policy: $($_.Exception.Message)" "ERROR"
+            throw
+        }
+    }
+
+    try {
+        New-RetentionComplianceRule -Name "SP/OD $spodRetentionYears Year Retention Rule" -Policy "SharePoint and OneDrive $spodRetentionYears Year Retention" -RetentionDuration $spodRetentionDays -RetentionComplianceAction Keep -ErrorAction Stop
+        Write-Log "Created SP/OD $spodRetentionYears Year Retention Rule" "INFO"
+    }
+    catch {
+        if ($_.Exception.Message -like "*already exists*") {
+            Write-Log "SP/OD $spodRetentionYears Year Retention Rule already exists. Skipping creation." "INFO"
+        }
+        else {
+            Write-Log "Error creating SP/OD $spodRetentionYears Year Retention Rule: $($_.Exception.Message)" "ERROR"
+            throw
+        }
+    }
+
+    Write-Log "Compliance Policies configuration completed" "INFO"
 }
 
 ################################################
@@ -735,7 +775,7 @@ function Set-SecurityAlertNotifications {
     try {
         Write-Log "Configuring enhanced security alert notifications" "INFO"
 
-        $notificationEmail = $Config.GlobalAdminUPN
+        $notificationEmail = $($Global:Credential.UserName)
 
         # Function to create a new alert policy with error handling
         function New-AlertPolicy {
@@ -842,6 +882,9 @@ try {
     Verify-ServiceConnections
 
     $config = Load-Configuration
+
+    # Set some more variables
+    $Global:breakGlassUPN = "$($Config.MSPName)BG@$((Get-AzureADTenantDetail).VerifiedDomains[0].Name)"
 
     Set-AzureADConfig -Config $config
     Set-ExchangeOnlineConfig -Config $config

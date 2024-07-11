@@ -60,7 +60,7 @@ function Import-AllServices {
             try {
                 foreach ($SubModule in $SubModules) {
                     Import-Module $SubModule
-                    Write-Log "Imported Graph Module: $SubModule" "INFO"
+                    Write-Host "Imported Graph Module: $SubModule"
                 }                
             }
             catch {
@@ -75,7 +75,7 @@ function Import-AllServices {
             #Normal Modules
             try {
                 Import-Module $Module -ErrorAction Stop
-                Write-Log "Imported Module: $Module" "INFO"
+                Write-Host "Imported Module: $Module"
             }
             catch {
                 Write-Log "Unable to import $Module. Details: $_" "ERROR"

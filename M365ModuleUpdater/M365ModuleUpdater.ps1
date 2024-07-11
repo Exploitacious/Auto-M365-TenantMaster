@@ -51,14 +51,14 @@ function Remove-Modules {
     )
     
     foreach ($module in $ModuleName) {
-        Write-Log "Checking for un-needed module: $module" "INFO"
+        Write-Host "Checking for un-needed module: $module"
         $installedModule = Get-InstalledModule -Name $module -ErrorAction SilentlyContinue
         
         if ($installedModule) {
             Write-Log "Removing module: $module" "INFO"
             try {
                 Uninstall-Module -Name $module -AllVersions -Force
-                Write-Log "Attempted to remove module: $module" "INFO"
+                Write-Host "Attempted to remove module: $module"
             }
             catch {
                 Write-Log "Failed to remove module: $module. Error: $($_.Exception.Message)" "ERROR"
@@ -85,7 +85,7 @@ function Update-Modules {
     $installedVersions = $installedModules.Version
 
     # Log the current version
-    Write-Log "Current version(s) of ${ModuleName}: ${currentVersions}" "INFO"
+    Write-Host "Current version(s) of ${ModuleName}: ${currentVersions}"
 
     # Set Required Versions
     if ($ModuleName -eq "ExchangeOnlineManagement") {
@@ -96,7 +96,7 @@ function Update-Modules {
     }
 
     # Log the required version
-    Write-Log "Required version for ${ModuleName}: ${requiredVersion}" "INFO"
+    Write-Host "Required version for ${ModuleName}: ${requiredVersion}"
 
     # Get Latest Versions
     $CurrentModule = Find-Module -Name $ModuleName -RequiredVersion $requiredVersion
@@ -113,7 +113,7 @@ function Update-Modules {
         param (
             [string]$ModuleName
         )
-        Write-Log "Attempting to close module ${ModuleName} which is currently in use" "WARNING"
+        Write-Host "Attempting to close module ${ModuleName} which is currently in use"
         try {
             # Attempt to remove the module forcibly
             Get-Module -Name $ModuleName -ListAvailable | ForEach-Object {
@@ -180,7 +180,7 @@ function Update-Modules {
             try {
                 Attempt-ForceCloseModule "AzureAD"
                 Uninstall-Module -Name "AzureAD" -AllVersions -Force
-                Write-Log "AzureAD module uninstall attempted." "INFO"
+                Write-Host "AzureAD module uninstall attempted."
             }
             catch {
                 Write-Log "Failed to uninstall AzureAD module. Error: $($_.Exception.Message)" "ERROR"
@@ -226,7 +226,7 @@ function Update-Modules {
         try {
             Install-Module -Name $ModuleName -RequiredVersion $requiredVersion -Force -SkipPublisherCheck
             if (Verify-ModuleVersion -ModuleName $ModuleName -ExpectedVersion $requiredVersion) {
-                Write-Log "${ModuleName} Successfully Installed" "INFO"
+                Write-Host "${ModuleName} Successfully Installed" 
                 $status = "Updated"
                 $version = $requiredVersion
             }
@@ -236,7 +236,7 @@ function Update-Modules {
         }
         catch {
             Write-Log "Something went wrong with installing ${ModuleName}. Details:" "ERROR"
-            Write-Log -ForegroundColor red "$_.Exception.Message" "ERROR"
+            Write-Log "$($_.Exception.Message)" "ERROR"
             $status = "Update Failed"
         }
     }
@@ -281,7 +281,7 @@ Write-Host "Installing Required M365 Modules and Updating All PS Modules..." -Fo
 foreach ($Module in $FullModuleList) {
     if (![string]::IsNullOrEmpty($Module)) {
         Write-Host
-        Write-Log "Processing module: $Module" "INFO"
+        Write-Host "Processing module: $Module"
         Update-Modules -ModuleName $Module
     }
 }

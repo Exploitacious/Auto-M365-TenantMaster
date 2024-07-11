@@ -28,11 +28,11 @@ if ($PSVersionTable.PSVersion.Major -lt 5) {
 Import-Module Microsoft.PowerShell.Utility
 
 # Initialize variables
+$scriptPath = $PSScriptRoot
 $logFile = Join-Path $PSScriptRoot "Launcher_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
-$configFile = Join-Path $PSScriptRoot "paths.json"
-$CombinedLogFile = Join-Path $PSScriptRoot "AutoM365Config_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
+$configFile = Join-Path $PSScriptRoot "config.json"
 
-# Modules
+# Modules Required
 $Global:Modules = @(
     "ExchangeOnlineManagement"
     "AzureADPreview"
@@ -63,28 +63,92 @@ function Load-Configuration {
         Write-Output "Loading configuration from $configFile"
         $config = Get-Content $configFile -Raw | ConvertFrom-Json
         if (-not $config.ScriptPaths) {
-            Write-Log "Configuration file does not contain ScriptPaths. Using default configuration." "WARNING"
-            $config = $null
+            throw "Configuration file does not contain ScriptPaths. Unable to proceed."
         }
     }
+    # Creating new config file with default values
     else {
-        Write-Log "Configuration file not found. Using default configuration." "WARNING"
-        $config = $null
-    }
+        Write-Log "Configuration file not found. Generating new one with DEFAULT values.." "WARNING"
+        Write-Host
 
-    if (-not $config) {
-        Write-Output "Creating default configuration."
+        # Gather some details 
+        Write-Host "Enter a one-word name of your MSP (Example: Umbrella)" -ForegroundColor DarkYellow
+        $Global:mspName = Read-Host 
+        Write-Host
+
+        # Alerts Address
+        Write-Host "Enter the Alerting Mailbox Address for your MSP (Example: alerting@umbrellaitgroup.com)" -ForegroundColor DarkYellow
+        $Global:mspAlertsAddress = Read-Host
+        Write-Host
+
+        # Alerts Address
+        Write-Host "Enter the URL for the logo of the company" -ForegroundColor DarkYellow
+        $CompanyLogo = Read-Host
+        Write-Host
+
         $config = @{
-            ScriptPaths = @{
-                ModuleUpdater        = "M365ModuleUpdater\M365ModuleUpdater.ps1"
-                ModuleConnector      = "M365ModuleConnector\M365ModuleConnector.ps1"
-                TenantExchangeConfig = "TenantExchangeConfig\TenantExchangeConfig.ps1"
-                ATPConfig            = "AdvancedThreatProtection\ATPConfig.ps1"
+            BreakGlassAccountPass      = "Powershellisbeast8442!"
+            MSPAlertsAddress           = $Global:mspAlertsAddress
+            MSPName                    = $Global:mspName
+            AdminAccessToMailboxes     = $true
+            DisableFocusedInbox        = $true
+            DisableSecurityDefaults    = $true
+            DeleteStaleDevices         = $true
+            StaleDeviceThresholdDays   = 90
+            AuditLogAgeLimit           = 730
+            DevicePilotGroupName       = "Pilot-DeviceCompliance"
+            GroupCreatorsGroupName     = "Group Creators"
+            ExcludeFromCAGroupName     = "Exclude From CA"
+            AllowedAutoForwardingGroup = "AutoForwarding-Allowed"
+            Language                   = "en-US"
+            Timezone                   = "Eastern Standard Time"
+            LogoURL                    = $CompanyLogo
+            TeamsConfig                = @{
+                AllowOrgWideTeamCreation  = $false
+                AllowFederatedUsers       = $true
+                AllowTeamsConsumer        = $false
+                AllowTeamsConsumerInbound = $false
+                AllowGuestAccess          = $true
+                DisableAnonymousJoin      = $true
+                AllowBox                  = $false
+                AllowDropBox              = $false
+                AllowEgnyte               = $false
+                AllowEmailIntoChannel     = $true
+                AllowGoogleDrive          = $false
+            }
+            SharePointOneDriveConfig   = @{
+                OneDriveStorageQuota              = 1048576
+                SharingCapability                 = "ExternalUserAndGuestSharing"
+                DefaultSharingLinkType            = "Internal"
+                PreventExternalUsersFromResharing = $true
+                BccExternalSharingInvitations     = $true
+            }
+            CompliancePolicies         = @{
+                EmailRetentionYears              = 10
+                SharePointOneDriveRetentionYears = 10
+            }
+            ScriptPaths                = @{
                 DLPConfig            = "DataLossPrevention\DLPConfig.ps1"
+                ModuleUpdater        = "M365ModuleUpdater\M365ModuleUpdater.ps1"
+                TenantExchangeConfig = "TenantExchangeConfig\TenantExchangeConfig.ps1"
+                ModuleConnector      = "M365ModuleConnector\M365ModuleConnector.ps1"
+                ATPConfig            = "AdvancedThreatProtection\ATPConfig.ps1"
             }
         }
-        $config | ConvertTo-Json | Set-Content $configFile
-        Write-Output "Default configuration saved to $configFile"
+        $Config | ConvertTo-Json | Out-File "$scriptPath\config.json"
+
+        # Optional Exit / Confirmation
+        Clear-Host
+        Write-Host
+        Write-Host "A new config file has been generated and placed at script root (Same directory as this Launcher script)." -ForegroundColor DarkYellow
+        Write-Host
+        Write-Host "The password for your BreakGlass account will be 'Powershellisbeast8442!'" -ForegroundColor DarkGreen
+        Write-Host
+        Write-Host "Press any button to continue, or exit script (Ctrl-C) to review the config file before proceeding (See Readme)" -ForegroundColor DarkYellow
+        Read-Host 
+
+        write-title
+
     }
     return $config
 }
@@ -194,6 +258,19 @@ function Check-ExistingConnections {
     $connections = @()
     $DisplayConnections = @()
 
+    # Check Config File
+    try {
+        $config = Get-Content $configFile -Raw -ErrorAction Stop | ConvertFrom-Json
+        if ($config.MSPName) {
+            $connections += "Config File"
+            $DisplayConnections += "Config File"
+        }
+    }
+    catch {
+        Write-Log "CRITICAL: Config file not found" "ERROR"
+        Load-Configuration
+    }
+
     # Check Exchange Online Management connection
     try {
         $exchangeConnection = Get-Module -Name ExchangeOnlineManagement -ListAvailable
@@ -204,7 +281,7 @@ function Check-ExistingConnections {
         }
     }
     catch {
-        Write-Log "Not connected to Exchange Online" "WARNING"
+        Write-Host " - Not connected to Exchange Online"
     }
 
     # Check Security and Compliance Center connection
@@ -217,7 +294,7 @@ function Check-ExistingConnections {
         }
     }
     catch {
-        Write-Log "Not connected to Security & Compliance Center" "WARNING"
+        Write-Host " - Not connected to Security & Compliance Center"
     }
 
     # Check Azure AD connection
@@ -227,7 +304,7 @@ function Check-ExistingConnections {
         $DisplayConnections += "Azure AD (Tenant: $($azureADInfo.DisplayName))"
     }
     catch {
-        Write-Log "Not connected to Azure AD" "WARNING"
+        Write-Host " - Not connected to Azure AD"
     }
 
     # Check MSOnline connection
@@ -237,7 +314,7 @@ function Check-ExistingConnections {
         $DisplayConnections += "MSOnline (Tenant: $($msolCompanyInfo.DisplayName))"
     }
     catch {
-        Write-Log "Not connected to MSOnline" "WARNING"
+        Write-Host " - Not connected to MSOnline"
     }
 
     # Check Teams connection
@@ -250,7 +327,7 @@ function Check-ExistingConnections {
         }
     }
     catch {
-        Write-Log "Not connected to Microsoft Teams" "WARNING"
+        Write-Host " - Not connected to Microsoft Teams"
     }
 
     # Check SharePoint Online connection
@@ -262,7 +339,7 @@ function Check-ExistingConnections {
         }
     }
     catch {
-        Write-Log "Not connected to SharePoint Online" "WARNING"
+        Write-Host " - Not connected to SharePoint Online"
     }
 
     # Check MS Graph connection
@@ -275,7 +352,7 @@ function Check-ExistingConnections {
         }
     }
     catch {
-        Write-Log "Not connected to MS Graph" "WARNING"
+        Write-Host " - Not connected to MS Graph"
     }
 
     # Check Microsoft.Graph connection
@@ -285,7 +362,7 @@ function Check-ExistingConnections {
         $DisplayConnections += "MG Graph (new) (Tenant: $($graphInfo.DisplayName))"
     }
     catch {
-        Write-Log "Not connected to Microsoft.Graph" "WARNING"
+        Write-Host " - Not connected to Microsoft.Graph"
     }
 
     # Check AIPService connection
@@ -297,7 +374,7 @@ function Check-ExistingConnections {
         }
     }
     catch {
-        Write-Log "Not connected to AIPService" "WARNING"
+        Write-Host " - Not connected to AIPService"
     }
 
     #return $connections
@@ -337,10 +414,10 @@ function Check-AllNecessaryConnections {
 # Function to display existing connections and prompt for action
 function Prompt-ExistingConnections {
     $Global:existingConnections = Check-ExistingConnections
-    if ($Global:existingConnections.Count -gt 0) {
+    if ($Global:existingConnections.Count -gt 1) {
         Write-Host
-        Write-Host "Connections Established:"
-        $Global:existingConnections | ForEach-Object { Write-Host "- $_" -ForegroundColor Cyan }
+        Write-Host "Prerequisites Established:"
+        $Global:existingConnections | ForEach-Object { Write-Host " - $_" -ForegroundColor Cyan }
         Write-Host
         Write-Log "Proceeding with established connections." "INFO"
     }
@@ -463,31 +540,36 @@ function Close-ExistingConnections {
     Write-Log "All connections have been closed." "INFO"
 }
 
+# Main Title Function
+function write-title {
+    Clear-Host
+    Write-Host "                            .___  ___.  ____      __    _____                                               "
+    Write-Host "                            |   \/   | |___ \    / /   | ____|                                              "
+    Write-Host "                            |  \  /  |   __) |  / /_   | |__                                                "
+    Write-Host "                            |  |\/|  |  |__ <  | '_ \  |___ \                                               "
+    Write-Host "                            |  |  |  |  ___) | | (_) |  ___) |                                              "
+    Write-Host "                            |__|  |__| |____/   \___/  |____/                                               "
+    Write-Host "                                                                                                            "
+    Write-Host "   ______   ______   .__   __.  _______  __    _______  __    __  .______          ___   .___________.  ______   .______       "
+    Write-Host "  /      | /  __  \  |  \ |  | |   ____||  |  /  _____||  |  |  | |   _  \        /   \  |           | /  __  \  |   _  \      "
+    Write-Host " |  ,----'|  |  |  | |   \|  | |  |__   |  | |  |  __  |  |  |  | |  |_)  |      /  ^  \ '---|  |----'|  |  |  | |  |_)  |     "
+    Write-Host " |  |     |  |  |  | |  . '  | |   __|  |  | |  | |_ | |  |  |  | |      /      /  /_\  \    |  |     |  |  |  | |      /      "
+    Write-Host " |  '----.|  '--'  | |  |\   | |  |     |  | |  |__| | |  '--'  | |  |\  \----./  _____  \   |  |     |  '--'  | |  |\  \----. "
+    Write-Host "  \______| \______/  |__| \__| |__|     |__|  \______|  \______/  | _| '._____/__/     \__\  |__|      \______/  | _| '._____| "
+    Write-Host                                                                                                                                                         
+    Write-Host
+    Write-Host " Created by Alex Ivantsov @Exploitacious "
+    Write-Host
+}
+
 ##################################################
 ### Main script logic
 ##################################################
 
-Clear-Host
-Write-Host "                            .___  ___.  ____      __    _____                                               "
-Write-Host "                            |   \/   | |___ \    / /   | ____|                                              "
-Write-Host "                            |  \  /  |   __) |  / /_   | |__                                                "
-Write-Host "                            |  |\/|  |  |__ <  | '_ \  |___ \                                               "
-Write-Host "                            |  |  |  |  ___) | | (_) |  ___) |                                              "
-Write-Host "                            |__|  |__| |____/   \___/  |____/                                               "
-Write-Host "                                                                                                            "
-Write-Host "   ______   ______   .__   __.  _______  __    _______  __    __  .______          ___   .___________.  ______   .______       "
-Write-Host "  /      | /  __  \  |  \ |  | |   ____||  |  /  _____||  |  |  | |   _  \        /   \  |           | /  __  \  |   _  \      "
-Write-Host " |  ,----'|  |  |  | |   \|  | |  |__   |  | |  |  __  |  |  |  | |  |_)  |      /  ^  \ '---|  |----'|  |  |  | |  |_)  |     "
-Write-Host " |  |     |  |  |  | |  . '  | |   __|  |  | |  | |_ | |  |  |  | |      /      /  /_\  \    |  |     |  |  |  | |      /      "
-Write-Host " |  '----.|  '--'  | |  |\   | |  |     |  | |  |__| | |  '--'  | |  |\  \----./  _____  \   |  |     |  '--'  | |  |\  \----. "
-Write-Host "  \______| \______/  |__| \__| |__|     |__|  \______|  \______/  | _| '._____/__/     \__\  |__|      \______/  | _| '._____| "
-Write-Host                                                                                                                                                         
-Write-Host
-Write-Host " Created by Alex Ivantsov @Exploitacious "
-Write-Host
-
 # Load configuration
 $config = Load-Configuration
+
+write-title
 
 # Menu Loop
 do {
@@ -533,6 +615,6 @@ do {
 until ($input -eq 'q')
 
 Write-Host
-Write-Host "Use the log to extract information regarding the work completed for work/time/ticket entry"
+Write-Host "Use the log file for information regarding the work completed for the work/time/ticket entry."
 Write-Host
 Read-Host "Press any key to exit"
