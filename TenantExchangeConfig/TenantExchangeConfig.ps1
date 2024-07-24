@@ -553,6 +553,18 @@ function Set-AzureADConfig {
             Write-Log "Group Creators group not found. Skipping group creation restriction." "WARNING"
         }
 
+        # Hide admin users from the global address list
+        Write-Log "Hiding admin users from the global address list" "INFO"
+        foreach ($adminEmail in $adminUsers) {
+            try {
+                Set-Mailbox -Identity $adminEmail -HiddenFromAddressListsEnabled $true -ErrorAction Stop
+                Write-Log "Successfully hid $adminEmail from the global address list" "INFO"
+            }
+            catch {
+                Write-Log "Failed to hide $adminEmail from the global address list: $($_.Exception.Message)" "ERROR"
+            }
+        }
+
         # Setup Email Forwarding for Global Admin
         Write-Log "Setting up email forwarding for Global Admin" "INFO"
         try {

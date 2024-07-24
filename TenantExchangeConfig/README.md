@@ -111,7 +111,8 @@ The script makes the following key modifications:
    - Adds admin accounts to these newly created groups
    - Created a "Super Admin" Role to give more power to Global Admins not available by default (See line 429 for more details)
    - Configures "group creators" group creation restrictions
-   - Grant ADmin access to all mailboxes in Tenant (Optional)
+   - Grant Admin access to all mailboxes in Tenant (Optional)
+   - Hides both global admin users from GAL
 
 3. MSOL:
 
