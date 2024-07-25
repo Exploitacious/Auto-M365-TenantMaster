@@ -300,9 +300,8 @@ function Check-ExistingConnections {
     try {
         $complianceConnection = Get-ComplianceSearch -ErrorAction Stop
         if ($complianceConnection) {
-            $tenantInfo = Get-OrganizationConfig -ErrorAction Stop
             $connections += "IPPSSession"
-            $DisplayConnections += "Security and Compliance Center (Tenant: $($tenantInfo.DisplayName))"
+            $DisplayConnections += "Security and Compliance Center"
         }
     }
     catch {
