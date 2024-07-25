@@ -529,11 +529,11 @@ function Set-AzureADConfig {
         Write-Log "Configuring Guest Admins group and guest invite settings" "INFO"
 
         # Create "Guest Admins" group if it doesn't exist
-        $guestAdminsGroupName = $Config.GuestCreatorAdminsGroupName
+        $guestAdminsGroupName = "Guest Admins"
         $guestAdminsGroup = Get-AzureADGroup -Filter "DisplayName eq '$guestAdminsGroupName'" -ErrorAction SilentlyContinue
         if (-not $guestAdminsGroup) {
             try {
-                $guestAdminsGroup = New-AzureADGroup -DisplayName $guestAdminsGroupName -MailEnabled $false -SecurityEnabled $true -MailNickName "NotSet" -Description "Users allowed to invite and manage guest users"
+                $guestAdminsGroup = New-AzureADGroup -DisplayName $guestAdminsGroupName -MailEnabled $false -SecurityEnabled $true -MailNickName "NotSet" -Description "Users allowed to invite guest users"
                 Write-Log "Created new Guest Admins group" "INFO"
             }
             catch {
@@ -562,32 +562,58 @@ function Set-AzureADConfig {
             }
         }
 
-        # Configure Azure AD to restrict guest invitations to Guest Admins group
+        # Assign Guest Inviter role to individual members of the Guest Admins group
         try {
-            $authorizationPolicy = Get-AzureADMSAuthorizationPolicy
-            $authorizationPolicy.AllowInvitesFrom = "AdminsAndGuestInviters"
-            $authorizationPolicy.GuestInviteRestrictions = "Group:" + $guestAdminsGroup.ObjectId
-            Set-AzureADMSAuthorizationPolicy -Id $authorizationPolicy.Id -AllowInvitesFrom $authorizationPolicy.AllowInvitesFrom -GuestInviteRestrictions $authorizationPolicy.GuestInviteRestrictions
-            Write-Log "Configured Azure AD to restrict guest invitations to Guest Admins group" "INFO"
+            $guestInviterRole = Get-AzureADDirectoryRole | Where-Object { $_.DisplayName -eq "Guest Inviter" }
+            if (-not $guestInviterRole) {
+                # If the role doesn't exist, activate it
+                $guestInviterRoleTemplate = Get-AzureADDirectoryRoleTemplate | Where-Object { $_.DisplayName -eq "Guest Inviter" }
+                Enable-AzureADDirectoryRole -RoleTemplateId $guestInviterRoleTemplate.ObjectId
+                $guestInviterRole = Get-AzureADDirectoryRole | Where-Object { $_.DisplayName -eq "Guest Inviter" }
+            }
+    
+            $groupMembers = Get-AzureADGroupMember -ObjectId $guestAdminsGroup.ObjectId -All $true
+            foreach ($member in $groupMembers) {
+                $existingRoleMember = Get-AzureADDirectoryRoleMember -ObjectId $guestInviterRole.ObjectId | 
+                Where-Object { $_.ObjectId -eq $member.ObjectId }
+        
+                if (-not $existingRoleMember) {
+                    Add-AzureADDirectoryRoleMember -ObjectId $guestInviterRole.ObjectId -RefObjectId $member.ObjectId
+                    Write-Log "Assigned Guest Inviter role to $($member.UserPrincipalName)" "INFO"
+                }
+                else {
+                    Write-Log "$($member.UserPrincipalName) already has the Guest Inviter role" "INFO"
+                }
+            }
         }
         catch {
-            Write-Log "Error configuring guest invitation restrictions: $($_.Exception.Message)" "ERROR"
+            Write-Log "Error assigning Guest Inviter role: $($_.Exception.Message)" "ERROR"
             throw
         }
 
         # Verify the configuration
         try {
-            $verifiedPolicy = Get-AzureADMSAuthorizationPolicy
-            if ($verifiedPolicy.AllowInvitesFrom -eq "AdminsAndGuestInviters" -and $verifiedPolicy.GuestInviteRestrictions -eq ("Group:" + $guestAdminsGroup.ObjectId)) {
-                Write-Log "Verified: Guest invitations are restricted to Guest Admins group" "INFO"
+            $roleMembers = Get-AzureADDirectoryRoleMember -ObjectId $guestInviterRole.ObjectId
+            $groupMembers = Get-AzureADGroupMember -ObjectId $guestAdminsGroup.ObjectId -All $true
+            $allMembersHaveRole = $true
+            foreach ($member in $groupMembers) {
+                if ($roleMembers.ObjectId -notcontains $member.ObjectId) {
+                    $allMembersHaveRole = $false
+                    Write-Log "Warning: $($member.UserPrincipalName) in Guest Admins group does not have the Guest Inviter role" "WARNING"
+                }
             }
-            else {
-                Write-Log "Warning: Guest invitation settings may not be correctly configured" "WARNING"
+            if ($allMembersHaveRole) {
+                Write-Log "Verified: All members of Guest Admins group have the Guest Inviter role" "INFO"
             }
         }
         catch {
             Write-Log "Error verifying guest invitation settings: $($_.Exception.Message)" "ERROR"
         }
+
+        Write-Log "Guest Admins group configuration completed" "INFO"
+
+
+
 
         # Grant Admin Access to All Mailboxes
         if ($Config.AdminAccessToMailboxes) {

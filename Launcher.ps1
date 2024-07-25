@@ -87,7 +87,8 @@ function Load-Configuration {
         Write-Host
 
         # Alerts Address
-        Write-Host "Enter the URL for the logo of the company" -ForegroundColor DarkYellow
+        Write-Host "Enter the URL for the logo of the company. Leave blank for no logo." -ForegroundColor DarkYellow
+        Write-Host "Accepted file types for logo are .jpeg,.jpg,.gif,.png." -ForegroundColor DarkYellow
         $CompanyLogo = Read-Host
         Write-Host
 
