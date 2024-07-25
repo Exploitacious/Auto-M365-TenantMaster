@@ -106,9 +106,6 @@ function Connect-AllServices {
         # Exchange Online Management     
         @{Name = "Exchange Online"; Cmd = { Connect-ExchangeOnline -UserPrincipalName $Global:Credential.UserName } },
 
-        # Security Compliance Center
-        @{Name = "Security and Compliance"; Cmd = { Connect-IPPSSession -UserPrincipalName $Global:Credential.UserName -UseRPSSession:$false } },
-
         # NEW Graph API
         @{Name = "MG Graph"; Cmd = { 
                 $Scopes = @(
@@ -148,6 +145,9 @@ function Connect-AllServices {
 
         # Teams Admin
         @{Name = "Teams"; Cmd = { Connect-MicrosoftTeams } },
+
+        # Security Compliance Center
+        @{Name = "Security and Compliance"; Cmd = { Connect-IPPSSession } }, # Removed: -UserPrincipalName $Global:Credential.UserName -UseRPSSession:$false
 
         # SharePoint Admin
         @{Name = "SharePoint"; Cmd = { 

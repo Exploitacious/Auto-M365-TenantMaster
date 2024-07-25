@@ -57,6 +57,11 @@ function Write-Log {
 }
 Write-Log "Starting up the M365 Configurator..." "INFO"
 
+# Random String Generation for Passwords
+function genRandString ([int]$length, [string]$chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%()') {
+    return -join ((1..$length) | ForEach-Object { Get-Random -InputObject $chars.ToCharArray() })
+}
+
 # Function to load and validate configuration
 function Load-Configuration {
     if (Test-Path $configFile) {
@@ -72,7 +77,7 @@ function Load-Configuration {
         Write-Host
 
         # Gather some details 
-        Write-Host "Enter a one-word name of your MSP (Example: Umbrella)" -ForegroundColor DarkYellow
+        Write-Host "Enter a one-word name of your MSP, with NO spaces or symbols (Example: Umbrella or UmbrellaIT)" -ForegroundColor DarkYellow
         $Global:mspName = Read-Host 
         Write-Host
 
@@ -86,8 +91,11 @@ function Load-Configuration {
         $CompanyLogo = Read-Host
         Write-Host
 
+        # New Password for BreakGlass
+        $BGUserPWString = genRandString 25
+
         $config = @{
-            BreakGlassAccountPass       = "Powershellisbeast8442!"
+            BreakGlassAccountPass       = $BGUserPWString
             MSPAlertsAddress            = $Global:mspAlertsAddress
             MSPName                     = $Global:mspName
             AdminAccessToMailboxes      = $true
@@ -141,11 +149,14 @@ function Load-Configuration {
         # Optional Exit / Confirmation
         Clear-Host
         Write-Host
-        Write-Host "A new config file has been generated and placed at script root (Same directory as this Launcher script)." -ForegroundColor DarkYellow
+        Write-Host "A new config file [config.json] has been generated and placed at script root (Same directory as this Launcher script)." -ForegroundColor DarkYellow
         Write-Host
-        Write-Host "The password for your BreakGlass account will be 'Powershellisbeast8442!'" -ForegroundColor DarkGreen
+        Write-Host "The password for your BreakGlass account will be (no spaces):   $BGUserPWString" -ForegroundColor Green
         Write-Host
-        Write-Host "Press any button to continue, or exit script (Ctrl-C) to review the config file before proceeding (See Readme)" -ForegroundColor DarkYellow
+        Write-Host "This password is also recorded in the config file."-ForegroundColor DarkGreen
+        Write-Host "Be sure to delete this file and change the password when you are finished." -ForegroundColor DarkGreen
+        Write-Host
+        Write-Host "Press any button to continue, or exit script (Ctrl-C) to review the config file before proceeding (See README)" -ForegroundColor DarkYellow
         Read-Host 
 
         write-title
@@ -444,7 +455,7 @@ function Prompt-ExistingConnections {
         Write-Log "Established Creds to $Global:TenantDomain with $($Global:Credential.UserName)" "INFO"
         Write-Host
         Write-Host "Global Variables" -ForegroundColor  DarkGreen
-        Write-Host " -= Tenant Domain: $Global:TenantDomain" -ForegroundColor DarkGreen
+        Write-Host " -= Tenant: $Global:TenantDomain" -ForegroundColor DarkGreen
         Write-Host " -= Tenant ID : $Global:TenantID" -ForegroundColor  DarkGreen
         Write-Host " -= Credential: $($Global:Credential.UserName)" -ForegroundColor  DarkGreen
     }
