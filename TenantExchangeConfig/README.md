@@ -49,6 +49,7 @@ The script uses a `config.json` file for customizable settings. Here's an exampl
   "DevicePilotGroupName": "Pilot - Device Compliance",
   "GroupCreatorsGroupName": "Group Creators",
   "ExcludeFromCAGroupName": "Exclude From CA",
+  "GuestCreatorAdminsGroupName": "Guest Creators",
   "AllowedAutoForwardingGroup": "AutoForwarding-Allowed",
   "Language": "en-US",
   "Timezone": "Eastern Standard Time",

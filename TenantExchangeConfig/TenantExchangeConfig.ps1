@@ -462,7 +462,7 @@ function Set-AzureADConfig {
                     }
                 }
             }
-        }    
+        }
 
         # Create or Update Super Admin Role Group
         Write-Log "Configuring Super Admin role group" "INFO"
@@ -524,6 +524,70 @@ function Set-AzureADConfig {
             }
         }
         Write-Log "Super Admin role group configuration completed" "INFO"                
+
+        # Create "Guest Admins" group and configure guest invite settings
+        Write-Log "Configuring Guest Admins group and guest invite settings" "INFO"
+
+        # Create "Guest Admins" group if it doesn't exist
+        $guestAdminsGroupName = $Config.GuestCreatorAdminsGroupName
+        $guestAdminsGroup = Get-AzureADGroup -Filter "DisplayName eq '$guestAdminsGroupName'" -ErrorAction SilentlyContinue
+        if (-not $guestAdminsGroup) {
+            try {
+                $guestAdminsGroup = New-AzureADGroup -DisplayName $guestAdminsGroupName -MailEnabled $false -SecurityEnabled $true -MailNickName "NotSet" -Description "Users allowed to invite and manage guest users"
+                Write-Log "Created new Guest Admins group" "INFO"
+            }
+            catch {
+                Write-Log "Error creating Guest Admins group: $($_.Exception.Message)" "ERROR"
+                throw
+            }
+        }
+        else {
+            Write-Log "Guest Admins group already exists" "INFO"
+        }
+
+        # Add admin users to the Guest Admins group
+        foreach ($adminUser in $adminUsers) {
+            try {
+                $user = Get-AzureADUser -ObjectId $adminUser
+                if (-not (Get-AzureADGroupMember -ObjectId $guestAdminsGroup.ObjectId -All $true | Where-Object { $_.ObjectId -eq $user.ObjectId })) {
+                    Add-AzureADGroupMember -ObjectId $guestAdminsGroup.ObjectId -RefObjectId $user.ObjectId
+                    Write-Log "Added $adminUser to Guest Admins group" "INFO"
+                }
+                else {
+                    Write-Log "$adminUser is already a member of Guest Admins group" "INFO"
+                }
+            }
+            catch {
+                Write-Log "Error adding $adminUser to Guest Admins group: $($_.Exception.Message)" "ERROR"
+            }
+        }
+
+        # Configure Azure AD to restrict guest invitations to Guest Admins group
+        try {
+            $authorizationPolicy = Get-AzureADMSAuthorizationPolicy
+            $authorizationPolicy.AllowInvitesFrom = "AdminsAndGuestInviters"
+            $authorizationPolicy.GuestInviteRestrictions = "Group:" + $guestAdminsGroup.ObjectId
+            Set-AzureADMSAuthorizationPolicy -Id $authorizationPolicy.Id -AllowInvitesFrom $authorizationPolicy.AllowInvitesFrom -GuestInviteRestrictions $authorizationPolicy.GuestInviteRestrictions
+            Write-Log "Configured Azure AD to restrict guest invitations to Guest Admins group" "INFO"
+        }
+        catch {
+            Write-Log "Error configuring guest invitation restrictions: $($_.Exception.Message)" "ERROR"
+            throw
+        }
+
+        # Verify the configuration
+        try {
+            $verifiedPolicy = Get-AzureADMSAuthorizationPolicy
+            if ($verifiedPolicy.AllowInvitesFrom -eq "AdminsAndGuestInviters" -and $verifiedPolicy.GuestInviteRestrictions -eq ("Group:" + $guestAdminsGroup.ObjectId)) {
+                Write-Log "Verified: Guest invitations are restricted to Guest Admins group" "INFO"
+            }
+            else {
+                Write-Log "Warning: Guest invitation settings may not be correctly configured" "WARNING"
+            }
+        }
+        catch {
+            Write-Log "Error verifying guest invitation settings: $($_.Exception.Message)" "ERROR"
+        }
 
         # Grant Admin Access to All Mailboxes
         if ($Config.AdminAccessToMailboxes) {

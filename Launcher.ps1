@@ -87,23 +87,24 @@ function Load-Configuration {
         Write-Host
 
         $config = @{
-            BreakGlassAccountPass      = "Powershellisbeast8442!"
-            MSPAlertsAddress           = $Global:mspAlertsAddress
-            MSPName                    = $Global:mspName
-            AdminAccessToMailboxes     = $true
-            DisableFocusedInbox        = $true
-            DisableSecurityDefaults    = $true
-            DeleteStaleDevices         = $true
-            StaleDeviceThresholdDays   = 90
-            AuditLogAgeLimit           = 730
-            DevicePilotGroupName       = "Pilot-DeviceCompliance"
-            GroupCreatorsGroupName     = "Group Creators"
-            ExcludeFromCAGroupName     = "Exclude From CA"
-            AllowedAutoForwardingGroup = "AutoForwarding-Allowed"
-            Language                   = "en-US"
-            Timezone                   = "Eastern Standard Time"
-            LogoURL                    = $CompanyLogo
-            TeamsConfig                = @{
+            BreakGlassAccountPass       = "Powershellisbeast8442!"
+            MSPAlertsAddress            = $Global:mspAlertsAddress
+            MSPName                     = $Global:mspName
+            AdminAccessToMailboxes      = $true
+            DisableFocusedInbox         = $true
+            DisableSecurityDefaults     = $true
+            DeleteStaleDevices          = $true
+            StaleDeviceThresholdDays    = 90
+            AuditLogAgeLimit            = 730
+            DevicePilotGroupName        = "Pilot-DeviceCompliance"
+            GroupCreatorsGroupName      = "Group Creators"
+            GuestCreatorAdminsGroupName = "Guest Creators"
+            ExcludeFromCAGroupName      = "Exclude From CA"
+            AllowedAutoForwardingGroup  = "AutoForwarding-Allowed"
+            Language                    = "en-US"
+            Timezone                    = "Eastern Standard Time"
+            LogoURL                     = $CompanyLogo
+            TeamsConfig                 = @{
                 AllowOrgWideTeamCreation  = $false
                 AllowFederatedUsers       = $true
                 AllowTeamsConsumer        = $false
@@ -116,18 +117,18 @@ function Load-Configuration {
                 AllowEmailIntoChannel     = $true
                 AllowGoogleDrive          = $false
             }
-            SharePointOneDriveConfig   = @{
+            SharePointOneDriveConfig    = @{
                 OneDriveStorageQuota              = 1048576
                 SharingCapability                 = "ExternalUserAndGuestSharing"
                 DefaultSharingLinkType            = "Internal"
                 PreventExternalUsersFromResharing = $true
                 BccExternalSharingInvitations     = $true
             }
-            CompliancePolicies         = @{
+            CompliancePolicies          = @{
                 EmailRetentionYears              = 10
                 SharePointOneDriveRetentionYears = 10
             }
-            ScriptPaths                = @{
+            ScriptPaths                 = @{
                 DLPConfig            = "DataLossPrevention\DLPConfig.ps1"
                 ModuleUpdater        = "M365ModuleUpdater\M365ModuleUpdater.ps1"
                 TenantExchangeConfig = "TenantExchangeConfig\TenantExchangeConfig.ps1"
