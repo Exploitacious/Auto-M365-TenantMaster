@@ -476,19 +476,6 @@ if ($Answer -eq 'y' -or $Answer -eq 'yes') {
    Write-Host
    Write-Host -ForegroundColor green "[v1.2] Data Loss Prevention Policy and Rules for All Non-Exchange Platforms have been created."
 
-} ## End Of Script
-
-
-#>
-
-
-# Connect to Security & Compliance Center PowerShell
-try {
-   Connect-IPPSSession
-}
-catch {
-   Write-Error "Failed to connect to Security & Compliance Center. Error: $_"
-   exit
 }
 
 # Function to create or update a label
