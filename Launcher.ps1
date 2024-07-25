@@ -298,11 +298,9 @@ function Check-ExistingConnections {
 
     # Check Security and Compliance Center connection
     try {
-        $complianceConnection = Get-ComplianceSearch -ErrorAction Stop
-        if ($complianceConnection) {
-            $connections += "IPPSSession"
-            $DisplayConnections += "Security and Compliance Center"
-        }
+        Get-ComplianceSearch -ErrorAction Stop
+        $connections += "IPPSSession"
+        $DisplayConnections += "Security and Compliance Center"
     }
     catch {
         Write-Host " - Not connected to Security & Compliance Center"
