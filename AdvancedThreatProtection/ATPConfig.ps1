@@ -113,6 +113,7 @@ function Set-AutoForwardAndJunkConfig {
     }
 }
 
+###################################
 # Function to configure Anti-Malware policy
 function Set-AntiMalwarePolicy {
     param (
@@ -187,36 +188,53 @@ function Set-AntiMalwarePolicy {
     }
 }
 
+###################################
 # Function to configure Anti-Phishing policy
 function Set-AntiPhishingPolicy {
-    param (
-        [array]$RecipientDomains,
-        [array]$TargetedUsersToProtect,
-        [array]$ExcludedDomains,
-        [array]$ExcludedSenders
-    )
+
+    # Set Domains
+    $AcceptedDomains = Get-AcceptedDomain
+    $RecipientDomains = $AcceptedDomains.DomainName
+
+    # Add any excluded / Whitelisted senders
+    # ExcludedDomains                     = $ExcludedDomains
+    # ExcludedSenders                     = $ExcludedSenders
+
+    # Migrate Whitelists
+    $AlreadyExcludedPhishSenders = Get-Antiphishpolicy "Office365 AntiPhish Default" | Select-Object -Expand ExcludedSenders
+    $AlreadyExcludedPhishDomains = Get-Antiphishpolicy "Office365 AntiPhish Default" | Select-Object -Expand ExcludedDomains
+    $WhitelistedPhishSenders = $AlreadyExcludedPhishSenders + $ExcludedSenders | Select-Object -Unique
+    $WhitelistedPhishDomains = $AlreadyExcludedPhishDomains + $ExcludedDomains | Select-Object -Unique
+
     try {
+        # Set New Custom Defaults
         Write-Log "Configuring Anti-Phishing Policy" "INFO"
         
         $policyParams = @{
-            Identity                            = "Office365 AntiPhish Default"
-            AdminDisplayName                    = "Default Anti-Phishing Policy"
-            EnableOrganizationDomainsProtection = $true
-            EnableTargetedDomainsProtection     = $true
-            TargetedDomainsToProtect            = $RecipientDomains
-            EnableTargetedUserProtection        = $true
-            TargetedUsersToProtect              = $TargetedUsersToProtect
-            EnableMailboxIntelligence           = $true
-            EnableMailboxIntelligenceProtection = $true
-            MailboxIntelligenceProtectionAction = "Quarantine"
-            EnableSpoofIntelligence             = $true
-            AuthenticationFailAction            = "MoveToJmf"
-            PhishThresholdLevel                 = 2
-            Enabled                             = $true
-            ExcludedDomains                     = $ExcludedDomains
-            ExcludedSenders                     = $ExcludedSenders
+            Identity                                      = "Office365 AntiPhish Default"
+            AdminDisplayName                              = "Custom Anti-Phishing Policy set on $(Get-Date -Format 'yyyyMMdd')"
+            AuthenticationFailAction                      = "Quarantine"
+            DmarcQuarantineAction                         = "Quarantine"
+            DmarcRejectAction                             = "Reject"
+            EnableFirstContactSafetyTips                  = $true
+            EnableMailboxIntelligence                     = $true
+            EnableMailboxIntelligenceProtection           = $true
+            EnableOrganizationDomainsProtection           = $true
+            EnableSimilarDomainsSafetyTips                = $true
+            EnableSimilarUsersSafetyTips                  = $true
+            EnableSpoofIntelligence                       = $true
+            EnableUnauthenticatedSender                   = $true
+            EnableUnusualCharactersSafetyTips             = $true
+            EnableViaTag                                  = $true
+            ExcludedDomains                               = $WhitelistedPhishDomains
+            ExcludedSenders                               = $WhitelistedPhishSenders
+            HonorDmarcPolicy                              = $true
+            ImpersonationProtectionState                  = "Automatic"
+            MailboxIntelligenceProtectionAction           = "Quarantine"
+            MailboxIntelligenceProtectionActionRecipients = $CusAdminAddress
+            PhishThresholdLevel                           = 2
         }
-        Set-AntiPhishPolicy @policyParams
+        Set-AntiPhishPolicy @policyParams -MakeDefault
 
         Write-Log "Anti-Phishing Policy configuration completed" "INFO"
     }
@@ -512,7 +530,7 @@ try {
         Write-Host "6. Configure Safe Links Policy"
         Write-Host "7. Configure Tenant Allow/Block List"
         Write-Host "8. Configure User Reported Messages"
-        Write-Host "A: Run All Configurations" -ForegroundColor Yellow
+        Write-Host "A: Configure ALL Policies" -ForegroundColor Yellow
         Write-Host "Q: Back to Main Menu"
         Write-Host
 
