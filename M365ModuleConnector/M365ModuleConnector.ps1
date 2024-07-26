@@ -198,12 +198,12 @@ function Connect-AllServices {
 
 Write-Log "Starting M365 Module Connector" "INFO"
 Write-Host
-Write-Host
-Write-Host "Please enter the Global Admin Account into the PowerShell Credential Prompt" -ForegroundColor Green
-Write-Host
 
 # Check/Enter Admin Creds
 If ($null -eq $Global:Credential.UserName) {
+    Write-Host
+    Write-Host "Please enter the Global Admin Account into the PowerShell Credential Prompt" -ForegroundColor Green
+    Write-Host
     try {
         $Global:Credential = Get-Credential -ErrorAction Stop
     }
@@ -216,6 +216,7 @@ If ($null -eq $Global:Credential.UserName) {
 else {
     Write-Log "$Global:TenantDomain Credentials $($Global:Credential.UserName) being used"
 }
+
 
 # Begin Checking and Connecting Services
 Import-AllServices
