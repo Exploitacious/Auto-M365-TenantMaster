@@ -263,7 +263,7 @@ function Set-AntiSpamPolicy {
     $BlackListedSpamSenders = $AlreadyBlacklistedSpamSenders + $ExcludedSenders | Select-Object -Unique
     $BlackListedSpamDomains = $AlreadyBlacklistedSpamDomains + $ExcludedDomains | Select-Object -Unique
 
-    # Configure Anti-Spam
+    # Configure Anti-Spam Settings
     try {
         Write-Log "Configuring Default Anti-Spam Inbound Policy" "INFO"
         $policyParams = @{
@@ -307,6 +307,8 @@ function Set-AntiSpamPolicy {
             'RecipientLimitInternalPerHour'             = 100;
             'RecipientLimitPerDay'                      = 500;
             'ActionWhenThresholdReached'                = 'Alert';
+            NotifyOutboundSpam                          = $true
+            NotifyOutboundSpamRecipients                = $CusAdminAddress
             'BccSuspiciousOutboundMail'                 = $true;
             'BccSuspiciousOutboundAdditionalRecipients' = $CusAdminAddress
         }
@@ -423,32 +425,9 @@ function Set-AntiSpamPolicy {
 
 # Function to configure Safe Attachments policy
 function Set-SafeAttachmentsPolicy {
-    param (
-        [string]$CusAdminAddress
-    )
     try {
-        Write-Log "Configuring Safe Attachments Policy" "INFO"
+        Write-Log "Configuring Default Safe Attachments Policy" "INFO"
         
-        $policyParams = @{
-            Name                     = "Default Safe Attachments Policy"
-            AdminDisplayName         = "Default Safe Attachments Policy"
-            Action                   = "DynamicDelivery"
-            ActionOnError            = $true
-            Enable                   = $true
-            Redirect                 = $true
-            RedirectAddress          = $CusAdminAddress
-            EnableForInternalSenders = $true
-        }
-        New-SafeAttachmentPolicy @policyParams
-
-        $ruleParams = @{
-            Name                 = "Default Safe Attachments Rule"
-            SafeAttachmentPolicy = "Default Safe Attachments Policy"
-            RecipientDomainIs    = (Get-AcceptedDomain).Name
-            Enabled              = $true
-        }
-        New-SafeAttachmentRule @ruleParams
-
         # Create bypass policy for admin
         $bypassPolicyParams = @{
             Name             = "Bypass Safe Attachments for Admin"
@@ -456,17 +435,71 @@ function Set-SafeAttachmentsPolicy {
             Action           = "Allow"
             Enable           = $true
         }
-        New-SafeAttachmentPolicy @bypassPolicyParams
-
         $bypassRuleParams = @{
             Name                 = "Bypass Safe Attachments Rule for Admin"
             SafeAttachmentPolicy = "Bypass Safe Attachments for Admin"
             SentTo               = $CusAdminAddress
             Enabled              = $true
+            Priority             = 0
         }
-        New-SafeAttachmentRule @bypassRuleParams
+        # Configure Bypass Safe Attachments for Admin
+        try {
+            # Test Existing
+            $testAdminSafeAttach = Get-SafeAttachmentPolicy -Identity "Bypass Safe Attachments for Admin" -ErrorAction Stop
+            if ($testAdminSafeAttach) {
+                Write-Log "Bypass Safe Attachments for Admin - Already Exists" "INFO"
+            }
+        }
+        catch {
+            # Write New
+            Write-Log "Starting Bypass Safe Attachments for Admin Policy Configuration" "INFO"
+        
+            # Setup Default Safe Attachments Policy
+        
+            New-SafeAttachmentPolicy @bypassPolicyParams
+            Write-Log "Bypass Safe Attachments for Admin Policy configuration completed" "INFO"
+                
+            New-SafeAttachmentRule @bypassRuleParams
+            Write-Log "Bypass Safe Attachments for Admin Rule configuration completed" "INFO"
+        }
 
-        Write-Log "Safe Attachments Policy configuration completed" "INFO"
+        # Default Safe Attach Params
+        $policyParams = @{
+            Name             = "Default Safe Attachments Policy"
+            AdminDisplayName = "Default Safe Attachments Policy"
+            Action           = "Block"
+            Enable           = $true
+            Redirect         = $true
+            RedirectAddress  = $CusAdminAddress
+        }
+        $ruleParams = @{
+            Name                 = "Default Safe Attachments Rule"
+            SafeAttachmentPolicy = "Default Safe Attachments Policy"
+            Enabled              = $true
+            Priority             = 1
+        }
+        # Default Safe Attachment
+        try {
+            # Test Existing
+            $testDefaultSafeAttach = Get-SafeAttachmentPolicy -Identity "Default Safe Attachments Policy" -ErrorAction Stop
+            if ($testDefaultSafeAttach) {
+                Write-Log "Default Safe Attachments Policy - Already Exists" "INFO"
+            }
+        }
+        catch {
+            # Write New
+            Write-Log "Starting Default Safe Attachments Policy Configuration" "INFO"
+
+            # Setup Default Safe Attachments Policy
+
+            New-SafeAttachmentPolicy @policyParams
+            Write-Log "Default Safe Attachments Policy configuration completed" "INFO"
+        
+            New-SafeAttachmentRule @ruleParams
+            Write-Log "Default Safe Attachments Rule configuration completed" "INFO"
+        }
+
+        Write-Log "All Safe Attachments Policy configuration completed" "INFO"
     }
     catch {
         Write-Log "Error in Set-SafeAttachmentsPolicy: $_" "ERROR"
@@ -481,6 +514,49 @@ function Set-SafeLinksPolicy {
     try {
         Write-Log "Configuring Safe Links Policy" "INFO"
         
+        # Bypass policy params for admin
+        $bypassPolicyParams = @{
+            Name                     = "Bypass Safe Links for Admin"
+            AdminDisplayName         = "Bypass Safe Links for Admin"
+            EnableSafeLinksForEmail  = $false
+            EnableSafeLinksForTeams  = $false
+            EnableSafeLinksForOffice = $false
+            TrackClicks              = $false
+            AllowClickThrough        = $true
+            ScanUrls                 = $false
+            EnableForInternalSenders = $false
+            DeliverMessageAfterScan  = $false
+            DisableUrlRewrite        = $true
+        }
+        $bypassRuleParams = @{
+            Name            = "Bypass Safe Links Rule for Admin"
+            SafeLinksPolicy = "Bypass Safe Links for Admin"
+            SentTo          = $CusAdminAddress
+            Enabled         = $true
+            Priority        = 0
+        }
+        # Bypass Safe Links
+        try {
+            # Test Existing
+            $testAdminSafeLink = Get-SafeLinksPolicy -Identity "Bypass Safe Links for Admin" -ErrorAction Stop
+            if ($testAdminSafeLink) {
+                Write-Log "Bypass Safe Links for Admin - Already Exists" "INFO"
+            }
+        }
+        catch {
+            # Write New
+            Write-Log "Starting Bypass Safe Links for Admin Configuration" "INFO"
+
+            # Setup Default Safe Attachments Policy
+
+            New-SafeLinksPolicy @bypassPolicyParams
+            Write-Log "Bypass Safe Links for Admin configuration completed" "INFO"
+        
+            New-SafeLinksRule @bypassRuleParams
+            Write-Log "Bypass Safe Links for Admin Rule configuration completed" "INFO"
+        }
+
+        # Default Safe Link Param
         $policyParams = @{
             Name                     = "Default Safe Links Policy"
             AdminDisplayName         = "Default Safe Links Policy"
@@ -495,34 +571,32 @@ function Set-SafeLinksPolicy {
             DisableUrlRewrite        = $false
             CustomNotificationText   = "The link you clicked was scanned by our Safe Links feature."
         }
-        New-SafeLinksPolicy @policyParams
-
         $ruleParams = @{
-            Name              = "Default Safe Links Rule"
-            SafeLinksPolicy   = "Default Safe Links Policy"
-            RecipientDomainIs = (Get-AcceptedDomain).Name
-            Enabled           = $true
-        }
-        New-SafeLinksRule @ruleParams
-
-        # Create bypass policy for admin
-        $bypassPolicyParams = @{
-            Name                     = "Bypass Safe Links for Admin"
-            AdminDisplayName         = "Bypass Safe Links for Admin"
-            ScanUrls                 = $false
-            EnableSafeLinksForEmail  = $false
-            EnableSafeLinksForTeams  = $false
-            EnableSafeLinksForOffice = $false
-        }
-        New-SafeLinksPolicy @bypassPolicyParams
-
-        $bypassRuleParams = @{
-            Name            = "Bypass Safe Links Rule for Admin"
-            SafeLinksPolicy = "Bypass Safe Links for Admin"
-            SentTo          = $CusAdminAddress
+            Name            = "Default Safe Links Rule"
+            SafeLinksPolicy = "Default Safe Links Policy"
             Enabled         = $true
+            Priority        = 1
         }
-        New-SafeLinksRule @bypassRuleParams
+        # Default Safe Links Policy
+        try {
+            # Test Existing
+            $testDefaultSafeLink = Get-SafeLinksPolicy -Identity "Default Safe Links Policy" -ErrorAction Stop
+            if ($testDefaultSafeLink) {
+                Write-Log "Default Safe Links Policy - Already Exists" "INFO"
+            }
+        }
+        catch {
+            # Write New
+            Write-Log "Starting Default Safe Links Policy Configuration" "INFO"
+        
+            # Setup Default Safe Attachments Policy
+        
+            New-SafeLinksPolicy @policyParams
+            Write-Log "Default Safe Links Policy configuration completed" "INFO"
+                
+            New-SafeLinksRule @ruleParams
+            Write-Log "Default Safe Links Rule configuration completed" "INFO"
+        }
 
         Write-Log "Safe Links Policy configuration completed" "INFO"
     }
