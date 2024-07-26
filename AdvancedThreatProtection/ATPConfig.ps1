@@ -243,67 +243,176 @@ function Set-AntiPhishingPolicy {
     }
 }
 
+###################################
 # Function to configure Anti-Spam policy
 function Set-AntiSpamPolicy {
-    param (
-        [string]$CusAdminAddress,
-        [array]$ExcludedSenders,
-        [array]$ExcludedDomains
-    )
-    try {
-        Write-Log "Configuring Anti-Spam Policy" "INFO"
+    
+    # Add any excluded / Whitelisted senders
+    # $ExcludedDomains                     = 
+    # $ExcludedSenders                     = 
+    
+    # Migrate Email White lists
+    $AlreadyExcludedSpamSenders = Get-HostedContentFilterPolicy -Identity "Default" | Select-Object -Expand AllowedSenders
+    $AlreadyExcludedSpamDomains = Get-HostedContentFilterPolicy -Identity "Default" | Select-Object -Expand AllowedSenderDomains
+    $WhitelistedSpamSenders = $AlreadyExcludedSpamSenders + $ExcludedSenders | Select-Object -Unique
+    $WhitelistedSpamDomains = $AlreadyExcludedSpamDomains + $ExcludedDomains | Select-Object -Unique
         
+    # Migrate Email Black lists
+    $AlreadyBlacklistedSpamSenders = Get-HostedContentFilterPolicy -Identity "Default" | Select-Object -Expand BlockedSenders
+    $AlreadyBlacklistedSpamDomains = Get-HostedContentFilterPolicy -Identity "Default" | Select-Object -Expand BlockedSenderDomains
+    $BlackListedSpamSenders = $AlreadyBlacklistedSpamSenders + $ExcludedSenders | Select-Object -Unique
+    $BlackListedSpamDomains = $AlreadyBlacklistedSpamDomains + $ExcludedDomains | Select-Object -Unique
+
+    # Configure Anti-Spam
+    try {
+        Write-Log "Configuring Default Anti-Spam Inbound Policy" "INFO"
         $policyParams = @{
             Identity                             = "Default"
-            AdminDisplayName                     = "Default Anti-Spam Policy"
+            AdminDisplayName                     = "Custom Anti-Spam Policy set on $(Get-Date -Format 'yyyyMMdd')"
+            BulkSpamAction                       = "MoveToJmf"
             BulkThreshold                        = 6
-            MarkAsSpamBulkMail                   = "On"
-            IncreaseScoreWithImageLinks          = "On"
+            PhishSpamAction                      = "Quarantine"
+            SpamAction                           = "Quarantine"
+            HighConfidencePhishAction            = "Quarantine"
+            HighConfidencePhishQuarantineTag     = "AdminOnlyAccessPolicy"
+            HighConfidenceSpamAction             = "Quarantine"
+            IncreaseScoreWithBizOrInfoUrls       = "On"
             IncreaseScoreWithNumericIps          = "On"
             IncreaseScoreWithRedirectToOtherPort = "On"
-            IncreaseScoreWithBizOrInfoUrls       = "On"
-            MarkAsSpamEmptyMessages              = "On"
-            MarkAsSpamJavaScriptInHtml           = "On"
-            MarkAsSpamFramesInHtml               = "On"
-            MarkAsSpamObjectTagsInHtml           = "On"
-            MarkAsSpamEmbedTagsInHtml            = "On"
-            MarkAsSpamFormTagsInHtml             = "On"
-            MarkAsSpamWebBugsInHtml              = "On"
-            MarkAsSpamSensitiveWordList          = "On"
-            MarkAsSpamSpfRecordHardFail          = "On"
-            MarkAsSpamFromAddressAuthFail        = "On"
-            MarkAsSpamNdrBackscatter             = "On"
-            QuarantineRetentionPeriod            = 30
             InlineSafetyTipsEnabled              = $true
-            BulkSpamAction                       = "MoveToJmf"
-            PhishSpamAction                      = "Quarantine"
-            SpamAction                           = "MoveToJmf"
-            EnableEndUserSpamNotifications       = $true
-            EndUserSpamNotificationFrequency     = 1
+            IntraOrgFilterState                  = "HighConfidenceSpam"
+            MarkAsSpamBulkMail                   = "On"
+            MarkAsSpamFromAddressAuthFail        = "On"
+            MarkAsSpamJavaScriptInHtml           = "On"
+            MarkAsSpamNdrBackscatter             = "On"
+            MarkAsSpamSpfRecordHardFail          = "On"
             SpamZapEnabled                       = $true
             PhishZapEnabled                      = $true
-            AllowedSenders                       = $ExcludedSenders
-            AllowedSenderDomains                 = $ExcludedDomains
-        }
-        Set-HostedContentFilterPolicy @policyParams
+            QuarantineRetentionPeriod            = 30
+            AllowedSenders                       = $WhitelistedSpamSenders
+            AllowedSenderDomains                 = $WhitelistedSpamDomains
+            BlockedSenderDomains                 = $BlackListedSpamSenders
+            BlockedSenders                       = $BlackListedSpamDomains
 
-        # Create bypass policy for admin
-        $bypassPolicyParams = @{
-            Name                     = "Bypass Spam Filter for Admin"
-            AdminDisplayName         = "Bypass Spam Filter for Admin"
-            SpamAction               = "AddXHeader"
-            HighConfidenceSpamAction = "AddXHeader"
-            BulkSpamAction           = "AddXHeader"
         }
-        New-HostedContentFilterPolicy @bypassPolicyParams
+        Set-HostedContentFilterPolicy @policyParams -MakeDefault
+        Write-Log "Configured Default Anti-Spam Policy" "INFO"
 
-        $bypassRuleParams = @{
-            Name                      = "Bypass Spam Filter Rule for Admin"
+        Write-Log "Configuring Default Anti-Spam Outbound Policy" "INFO"
+        $OutboundPolicyDefault = @{
+            Identity                                    = "Default"
+            'AdminDisplayName'                          = "Custom Outbound Mail Policy set on $(Get-Date -Format 'yyyyMMdd')";
+            'AutoForwardingMode'                        = "Off";
+            'RecipientLimitExternalPerHour'             = 100;
+            'RecipientLimitInternalPerHour'             = 100;
+            'RecipientLimitPerDay'                      = 500;
+            'ActionWhenThresholdReached'                = 'Alert';
+            'BccSuspiciousOutboundMail'                 = $true;
+            'BccSuspiciousOutboundAdditionalRecipients' = $CusAdminAddress
+        }
+        Set-HostedOutboundSpamFilterPolicy @OutboundPolicyDefault
+        Write-Log "Configured Default Anti-Spam Outbound Policy" "INFO"
+
+
+        # Bypass Inbound policy for admin
+        $bypassInboundPolicyParams = @{
+            Name                                   = "Bypass Spam Filter for Admin"
+            AdminDisplayName                       = "Bypass Spam Filter for Admin set on $(Get-Date -Format 'yyyyMMdd')"
+            'SpamAction'                           = 'AddXHeader'
+            'HighConfidenceSpamAction'             = 'Redirect'
+            'PhishSpamAction'                      = 'AddXHeader'
+            'BulkSpamAction'                       = 'AddXHeader'
+            'HighConfidencePhishAction'            = 'Redirect'
+            'RedirectToRecipients'                 = $Config.MSPAlertsAddress
+            'AddXHeaderValue'                      = "Unrestricted-Admin-Mail-ATP-BYPASS"
+            'SpamZapEnabled'                       = $false
+            'PhishZapEnabled'                      = $false
+            'QuarantineRetentionPeriod'            = 30
+            'BulkThreshold'                        = 9
+            'MarkAsSpamBulkMail'                   = 'off'
+            'IncreaseScoreWithImageLinks'          = 'off'
+            'IncreaseScoreWithNumericIps'          = 'off'
+            'IncreaseScoreWithRedirectToOtherPort' = 'off'
+            'IncreaseScoreWithBizOrInfoUrls'       = 'off'
+            'MarkAsSpamEmptyMessages'              = 'off'
+            'MarkAsSpamJavaScriptInHtml'           = 'off'
+            'MarkAsSpamFramesInHtml'               = 'off'
+            'MarkAsSpamObjectTagsInHtml'           = 'off'
+            'MarkAsSpamEmbedTagsInHtml'            = 'off'
+            'MarkAsSpamFormTagsInHtml'             = 'off'
+            'MarkAsSpamWebBugsInHtml'              = 'off'
+            'MarkAsSpamSensitiveWordList'          = 'off'
+            'MarkAsSpamSpfRecordHardFail'          = 'off'
+            'MarkAsSpamFromAddressAuthFail'        = 'off'
+            'MarkAsSpamNdrBackscatter'             = 'off'
+        }
+        $bypassInboundRuleParams = @{
+            Name                      = "Bypass Spam Filter for Admin Rule"
             HostedContentFilterPolicy = "Bypass Spam Filter for Admin"
-            SentTo                    = $CusAdminAddress
-            Enabled                   = $true
+            'Enabled'                 = $true
+            'Priority'                = "0"
+            'SentTo'                  = $CusAdminAddress
         }
-        New-HostedContentFilterRule @bypassRuleParams
+        # Inbound Admin Policy
+        try {
+            # Test Existing
+            $testAdminSpamPolicy = Get-HostedContentFilterPolicy -Identity "Bypass Spam Filter for Admin" -ErrorAction Stop
+            if ($testAdminSpamPolicy) {
+                Write-Log "Bypass Spam Filter for Admin - Already Exists" "INFO"
+            }
+        }
+        catch {
+            # Write New
+            Write-Log "Starting Admin-Bypass Anti-Spam Configuration" "INFO"
+
+            # Setup bypass policy for admin
+
+            New-HostedContentFilterPolicy @bypassInboundPolicyParams
+            Write-Log "Admin-Bypass Anti-Spam Policy configuration completed" "INFO"
+        
+            New-HostedContentFilterRule @bypassInboundRuleParams
+            Write-Log "Admin-Bypass Anti-Spam Rule configuration completed" "INFO"
+        }
+
+        # Bypass Outbound policy
+        $OutboundPolicyForAdmin = @{
+            'Name'                          = "Bypass Outbound Policy for Admin"
+            'AdminDisplayName'              = "Unrestricted Outbound Forwarding Policy from specified mailboxes (Should only be used for Admin and Service Mailboxes)";
+            'AutoForwardingMode'            = "On";
+            'RecipientLimitExternalPerHour' = 10000;
+            'RecipientLimitInternalPerHour' = 10000;
+            'RecipientLimitPerDay'          = 10000;
+            'ActionWhenThresholdReached'    = 'Alert';
+            'BccSuspiciousOutboundMail'     = $false
+        }
+        $OutboundRuleForAdmin = @{
+            'Name'                           = "Bypass Outbound Rule for Admin";
+            'Comments'                       = "Unrestricted Outbound Forwarding Policy from specified mailbox";
+            'HostedOutboundSpamFilterPolicy' = "Bypass Outbound Policy for Admin";
+            'Enabled'                        = $true;
+            'From'                           = $CusAdminAddress;
+            'Priority'                       = 0
+        }
+        # Outbound Admin Policy
+        try {
+            # Test Existing
+            $testAdminSpamPolicy = Get-HostedOutboundSpamFilterPolicy -Identity "Bypass Outbound Policy for Admin" -ErrorAction Stop
+            if ($testAdminSpamPolicy) {
+                Write-Log "Bypass Spam Filter for Admin - Already Exists" "INFO"
+            }
+        }
+        catch {
+            # Write New
+            Write-Log "Starting Admin-Bypass Anti-Spam Outbound Configuration" "INFO"
+
+            # Setup bypass policy for admin
+
+            New-HostedOutboundSpamFilterPolicy @OutboundPolicyForAdmin
+            Write-Log "Admin-Bypass Anti-Spam Outbound Policy configuration completed" "INFO"
+        
+            New-HostedOutboundSpamFilterRule @OutboundRuleForAdmin
+            Write-Log "Admin-Bypass Anti-Spam Outbound Rule configuration completed" "INFO"
+        }
 
         Write-Log "Anti-Spam Policy configuration completed" "INFO"
     }
@@ -544,9 +653,7 @@ try {
                 Set-AntiMalwarePolicy -CusAdminAddress $CusAdminAddress
             }
             '3' {
-                $recipientDomains = (Get-AcceptedDomain).Name
-                $targetedUsers = (Get-Mailbox -ResultSize Unlimited | Select-Object -ExpandProperty UserPrincipalName)
-                Set-AntiPhishingPolicy -RecipientDomains $recipientDomains -TargetedUsersToProtect $targetedUsers -ExcludedDomains $Config.ExcludedDomains -ExcludedSenders $Config.ExcludedSenders
+                Set-AntiPhishingPolicy
             }
             '4' {
                 Set-AntiSpamPolicy -CusAdminAddress $CusAdminAddress -ExcludedSenders $Config.ExcludedSenders -ExcludedDomains $Config.ExcludedDomains
@@ -566,9 +673,7 @@ try {
             'A' {
                 Set-AutoForwardAndJunkConfig -CusAdminAddress $CusAdminAddress -MSPAlertsAddress $Config.MSPAlertsAddress
                 Set-AntiMalwarePolicy -CusAdminAddress $CusAdminAddress
-                $recipientDomains = (Get-AcceptedDomain).Name
-                $targetedUsers = (Get-Mailbox -ResultSize Unlimited | Select-Object -ExpandProperty UserPrincipalName)
-                Set-AntiPhishingPolicy -RecipientDomains $recipientDomains -TargetedUsersToProtect $targetedUsers -ExcludedDomains $Config.ExcludedDomains -ExcludedSenders $Config.ExcludedSenders
+                Set-AntiPhishingPolicy
                 Set-AntiSpamPolicy -CusAdminAddress $CusAdminAddress -ExcludedSenders $Config.ExcludedSenders -ExcludedDomains $Config.ExcludedDomains
                 Set-SafeAttachmentsPolicy -CusAdminAddress $CusAdminAddress
                 Set-SafeLinksPolicy -CusAdminAddress $CusAdminAddress

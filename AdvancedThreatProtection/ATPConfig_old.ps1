@@ -214,7 +214,7 @@ function Set-AntiSpamPolicy {
         Write-Log "Setting up the new Default Inbound Anti-Spam Policy" "INFO"
         
         $HostedContentPolicyParam = @{
-            'AddXHeaderValue'                      = "M365 ATP Analysis: ";
+            'AddXHeaderValue'                      = "M365-ATP-Analysis";
             'AdminDisplayName'                     = "Inbound Anti-Spam Policy configured via M365 PS Scripting Tools";
             'AllowedSenders'                       = @{add = $ExcludedSenders };
             'AllowedSenderDomains'                 = @{add = $ExcludedDomains };
@@ -292,7 +292,7 @@ function Set-AntiSpamPolicy {
         $AdminIndoundContentPolicyParam = @{
             'Name'                                 = "Unrestricted Content Filter Policy for Admin"
             'AdminDisplayName'                     = "Inbound ADMIN Policy configured via M365 PS Scripting Tools";
-            'AddXHeaderValue'                      = "Unrestricted-Admin-Mail: ";
+            'AddXHeaderValue'                      = "Unrestricted-Admin-Mail"
             'RedirectToRecipients'                 = $MSPAlertAddress;
             'DownloadLink'                         = $false;
             'SpamAction'                           = 'AddXHeader';
