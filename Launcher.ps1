@@ -86,7 +86,17 @@ function Load-Configuration {
         $Global:mspAlertsAddress = Read-Host
         Write-Host
 
-        # Alerts Address
+        # Support Address
+        Write-Host "Enter the Support Email Mailbox Address for your MSP (Example: support@umbrellaitgroup.com)" -ForegroundColor DarkYellow
+        $Global:MSPSupportMail = Read-Host
+        Write-Host
+
+        # MSP Info
+        Write-Host "Enter Information for your MSP in one line (Example: Umbrella IT Group (904) 930-4261 )" -ForegroundColor DarkYellow
+        $Global:MSPSupportInfo = Read-Host
+        Write-Host
+
+        # Logo URL
         Write-Host "Enter the URL for the logo of the company. Leave blank for no logo." -ForegroundColor DarkYellow
         Write-Host "Accepted file types for logo are .jpeg,.jpg,.gif,.png." -ForegroundColor DarkYellow
         $CompanyLogo = Read-Host
@@ -99,6 +109,8 @@ function Load-Configuration {
             BreakGlassAccountPass       = $BGUserPWString
             MSPAlertsAddress            = $Global:mspAlertsAddress
             MSPName                     = $Global:mspName
+            MSPSupportMail              = $Global:MSPSupportMail
+            MSPSupportInfo              = $Global:MSPSupportInfo
             AdminAccessToMailboxes      = $true
             DisableFocusedInbox         = $true
             DisableSecurityDefaults     = $true

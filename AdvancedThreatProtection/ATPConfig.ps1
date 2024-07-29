@@ -60,8 +60,35 @@ function Verify-ServiceConnections {
     # Check if all necessary connections are established and set global variable
     if ($Global:connectionCheck -eq $true) {
         Write-Host
-        Write-Host " All necessary connections are established! Proceed with Configuration." -ForegroundColor Green
-        Write-Host
+        Write-Host " All necessary connections are established..." -ForegroundColor Green
+
+        # Verify connections at Security Center (This sometimes bugs out and simply needs a reconnection)
+        try {
+            # Test with the Get-TenantAllowBlockListItems CMDlet
+            $HideResult = Get-TenantAllowBlockListItems -ListType URL -ListSubType AdvancedDelivery -ErrorAction Stop
+            $HideResult = Get-TenantAllowBlockListItems -ListType Sender -ErrorAction Stop
+            Write-Host " Additional connection tests passed. Proceed with configuring!" -ForegroundColor Green
+        }
+        catch {
+            Write-Warning "Encountered an uncommon connection error. Attempting to reconnect to Exchange Online."
+            try {
+                Connect-ExchangeOnline -UserPrincipalName $Global:Credential.UserName -ShowProgress $true
+            }
+            catch {
+                Throw "Unable to connect. Error Message: $_"
+            }
+            try {
+                if ($PSCmdlet.MyInvocation.BoundParameters.ContainsKey('ListSubType')) {
+                    Get-TenantAllowBlockListItems -ListType $ListType -ListSubType $ListSubType
+                }
+                else {
+                    Get-TenantAllowBlockListItems -ListType $ListType
+                }
+            }
+            catch {
+                Throw "Failed to get Tenant Allow Block List Items after reconnecting: $_"
+            }
+        }
     }
     else {
         Write-Host
@@ -196,15 +223,11 @@ function Set-AntiPhishingPolicy {
     $AcceptedDomains = Get-AcceptedDomain
     $RecipientDomains = $AcceptedDomains.DomainName
 
-    # Add any excluded / Whitelisted senders
-    # ExcludedDomains                     = $ExcludedDomains
-    # ExcludedSenders                     = $ExcludedSenders
-
     # Migrate Whitelists
     $AlreadyExcludedPhishSenders = Get-Antiphishpolicy "Office365 AntiPhish Default" | Select-Object -Expand ExcludedSenders
     $AlreadyExcludedPhishDomains = Get-Antiphishpolicy "Office365 AntiPhish Default" | Select-Object -Expand ExcludedDomains
-    $WhitelistedPhishSenders = $AlreadyExcludedPhishSenders + $ExcludedSenders | Select-Object -Unique
-    $WhitelistedPhishDomains = $AlreadyExcludedPhishDomains + $ExcludedDomains | Select-Object -Unique
+    $WhitelistedPhishSenders = $AlreadyExcludedPhishSenders | Select-Object -Unique
+    $WhitelistedPhishDomains = $AlreadyExcludedPhishDomains | Select-Object -Unique
 
     try {
         # Set New Custom Defaults
@@ -254,14 +277,14 @@ function Set-AntiSpamPolicy {
     # Migrate Email White lists
     $AlreadyExcludedSpamSenders = Get-HostedContentFilterPolicy -Identity "Default" | Select-Object -Expand AllowedSenders
     $AlreadyExcludedSpamDomains = Get-HostedContentFilterPolicy -Identity "Default" | Select-Object -Expand AllowedSenderDomains
-    $WhitelistedSpamSenders = $AlreadyExcludedSpamSenders + $ExcludedSenders | Select-Object -Unique
-    $WhitelistedSpamDomains = $AlreadyExcludedSpamDomains + $ExcludedDomains | Select-Object -Unique
+    $WhitelistedSpamSenders = $AlreadyExcludedSpamSenders | Select-Object -Unique
+    $WhitelistedSpamDomains = $AlreadyExcludedSpamDomains | Select-Object -Unique
         
     # Migrate Email Black lists
     $AlreadyBlacklistedSpamSenders = Get-HostedContentFilterPolicy -Identity "Default" | Select-Object -Expand BlockedSenders
     $AlreadyBlacklistedSpamDomains = Get-HostedContentFilterPolicy -Identity "Default" | Select-Object -Expand BlockedSenderDomains
-    $BlackListedSpamSenders = $AlreadyBlacklistedSpamSenders + $ExcludedSenders | Select-Object -Unique
-    $BlackListedSpamDomains = $AlreadyBlacklistedSpamDomains + $ExcludedDomains | Select-Object -Unique
+    $BlackListedSpamSenders = $AlreadyBlacklistedSpamSenders | Select-Object -Unique
+    $BlackListedSpamDomains = $AlreadyBlacklistedSpamDomains | Select-Object -Unique
 
     # Configure Anti-Spam Settings
     try {
@@ -607,31 +630,59 @@ function Set-SafeLinksPolicy {
 
 # Function to configure Tenant Allow/Block List
 function Set-TenantAllowBlockList {
-    param (
-        [array]$AllowedSenders,
-        [array]$AllowedDomains,
-        [array]$BlockedSenders,
-        [array]$BlockedDomains
+
+    # Additional Emails and Domains to Whitelist (Combined)
+    $AdditionalWhitelist = @(
+        "intuit.com", 
+        #$MSPDomain,
+        $Config.MSPAlertsAddress,
+        $Config.MSPSupportMail,
+        "connect@e.connect.intuit.com",
+        "advanced-threat-protection@protection.outlook.com"
     )
+
+    # Migrate Phish Whitelists
+    $AlreadyExcludedPhishSenders = Get-Antiphishpolicy "Office365 AntiPhish Default" | Select-Object -ExpandProperty ExcludedSenders
+    $AlreadyExcludedPhishDomains = Get-Antiphishpolicy "Office365 AntiPhish Default" | Select-Object -ExpandProperty ExcludedDomains
+
+    # Migrate Spam White lists
+    $AlreadyExcludedSpamSenders = Get-HostedContentFilterPolicy -Identity "Default" | Select-Object -ExpandProperty AllowedSenders
+    $AlreadyExcludedSpamDomains = Get-HostedContentFilterPolicy -Identity "Default" | Select-Object -ExpandProperty AllowedSenderDomains
+        
+    # Migrate Spam Black lists
+    $AlreadyBlacklistedSpamSenders = Get-HostedContentFilterPolicy -Identity "Default" | Select-Object -ExpandProperty BlockedSenders
+    $AlreadyBlacklistedSpamDomains = Get-HostedContentFilterPolicy -Identity "Default" | Select-Object -ExpandProperty BlockedSenderDomains
+
+    # Combined Lists (Domain and Email)
+    $WhitelistCombinedSenders = $AlreadyExcludedPhishDomains + $AlreadyExcludedPhishSenders + $AlreadyExcludedSpamSenders + $AlreadyExcludedSpamDomains + $AdditionalWhitelist | Select-Object -Unique
+    $BlacklistCombinedSenders = $AlreadyBlacklistedSpamSenders + $AlreadyBlacklistedSpamDomains | Select-Object -Unique
+
     try {
         Write-Log "Configuring Tenant Allow/Block List" "INFO"
-        
-        foreach ($sender in $AllowedSenders) {
-            New-TenantAllowBlockListItems -ListType Sender -Entries $sender -Allow $true
+        # Migrate Allow List
+        foreach ($sender in $WhitelistCombinedSenders) {
+            Write-Host "Processing $Sender ..." -ForegroundColor DarkYellow
+            $existingEntry = Get-TenantAllowBlockListItems -ListType Sender -Allow | Where-Object { $_.Entries -contains $sender }
+            if (-not $existingEntry) {
+                # $HideResult = New-TenantAllowBlockListItems -ListType Sender -Entries $sender -Allow -NoExpiration
+                Write-Log "Unable to add to Global Whitelist at this time due to Microsoft limitations. Skipping $sender " "INFO"
+            }
+            else {
+                Write-Log "Global Blacklist already contains $sender " "INFO"
+            }
         }
-        
-        foreach ($domain in $AllowedDomains) {
-            New-TenantAllowBlockListItems -ListType Domain -Entries $domain -Allow $true
+        # Migrate Block List
+        foreach ($sender in $BlacklistCombinedSenders) {
+            Write-Host "Processing $Sender ..." -ForegroundColor DarkYellow
+            $existingEntry = Get-TenantAllowBlockListItems -ListType Sender -Block | Where-Object { $_.Entries -contains $sender }
+            if (-not $existingEntry) {
+                $HideResult = New-TenantAllowBlockListItems -ListType Sender -Entries $sender -Block -NoExpiration
+                Write-Log "Global Blacklist += $sender " "INFO"
+            }
+            else {
+                Write-Log "Global Blacklist already contains $sender " "INFO"
+            }
         }
-        
-        foreach ($sender in $BlockedSenders) {
-            New-TenantAllowBlockListItems -ListType Sender -Entries $sender -Block $true
-        }
-        
-        foreach ($domain in $BlockedDomains) {
-            New-TenantAllowBlockListItems -ListType Domain -Entries $domain -Block $true
-        }
-
         Write-Log "Tenant Allow/Block List configuration completed" "INFO"
     }
     catch {
@@ -641,25 +692,81 @@ function Set-TenantAllowBlockList {
 
 # Function to configure User Reported Messages
 function Set-UserReportedMessages {
-    param (
-        [string]$CusAdminAddress
-    )
-    try {
-        Write-Log "Configuring User Reported Messages" "INFO"
-        
-        $params = @{
-            EnableReportToMicrosoft = $true
-            EnableUserSubmission    = $true
-            SubmissionReportOptions = "AllReports"
-            AdminAddress            = $CusAdminAddress
-        }
-        Set-ReportSubmissionPolicy @params
 
-        Write-Log "User Reported Messages configuration completed" "INFO"
+    try {
+        Write-Log "Configuring Report Submission Policy" "INFO"
+        
+        # Report Submission Policy Parameters
+        $reportPolicyParams = @{
+            Identity                         = "DefaultReportSubmissionPolicy"
+            DisableQuarantineReportingOption = $false
+            EnableOrganizationBranding       = $true
+            EnableReportToMicrosoft          = $true
+            ReportJunkToCustomizedAddress    = $true
+            ReportNotJunkToCustomizedAddress = $true
+            ReportPhishToCustomizedAddress   = $true
+            EnableThirdPartyAddress          = $false
+            EnableUserEmailNotification      = $true
+            PreSubmitMessageEnabled          = $true
+            PostSubmitMessageEnabled         = $true
+            PostSubmitMessage                = "Thank you for reporting the suspicious email. Your email has successfully been submitted for review."
+            PreSubmitMessage                 = "This email will be submitted to $Config.MSPName and Microsoft for analysis. This email will be removed from your mailbox and $Config.MSPName will reach out to you if further action is required.`n $($Config.MSPSupportInfo)"
+            PreSubmitMessageTitle            = "Report Suspicious Email"
+            PostSubmitMessageTitle           = "Thank you for being pro-active!"
+            ReportJunkAddresses              = $($Global:Credential.UserName)
+            ReportNotJunkAddresses           = $($Global:Credential.UserName)
+            ReportPhishAddresses             = $($Global:Credential.UserName)
+        }
+    
+        # Report Submission Rule Parameters
+        $reportRuleParams = @{
+            Identity               = "DefaultReportSubmissionRule"
+            ReportSubmissionPolicy = "DefaultReportSubmissionPolicy"
+            State                  = "Enabled"
+            Priority               = 0
+            SentTo                 = $($Global:Credential.UserName)
+        }
+    
+        # Configure Report Submission Policy
+        try {
+            # Test Existing Policy
+            $testPolicy = Get-ReportSubmissionPolicy -AdminDisplayName "DefaultReportSubmissionPolicy" -ErrorAction Stop
+            if ($testPolicy) {
+                Write-Log "Default Report Submission Policy - Already Exists" "INFO"
+            }
+        }
+        catch {
+            # Create New Policy
+            Write-Log "Starting Default Report Submission Policy Configuration" "INFO"
+            
+            Set-ReportSubmissionPolicy @reportPolicyParams
+            Write-Log "Default Report Submission Policy configuration completed" "INFO"
+        }
+    
+        # Configure Report Submission Rule
+        try {
+            # Test Existing Rule
+            $testRule = Get-ReportSubmissionRule -Identity "DefaultReportSubmissionRule" -ErrorAction Stop
+            if ($testRule) {
+                Write-Log "Default Report Submission Rule - Already Exists" "INFO"
+            }
+        }
+        catch {
+            # Create New Rule
+            Write-Log "Starting Default Report Submission Rule Configuration" "INFO"
+            
+            Set-ReportSubmissionRule @reportRuleParams
+            Write-Log "Default Report Submission Rule configuration completed" "INFO"
+        }
+    
+        # Display the updated settings to verify
+        Get-ReportSubmissionPolicy -Identity DefaultReportSubmissionPolicy | Format-List
+        Get-ReportSubmissionRule -Identity DefaultReportSubmissionRule | Format-List
     }
     catch {
-        Write-Log "Error in Set-UserReportedMessages: $_" "ERROR"
+        Write-Log "An error occurred during the configuration: $_" "ERROR"
     }
+
 }
 
 
@@ -711,8 +818,8 @@ try {
         Write-Host "4. Configure Anti-Spam Policy"
         Write-Host "5. Configure Safe Attachments Policy"
         Write-Host "6. Configure Safe Links Policy"
-        Write-Host "7. Configure Tenant Allow/Block List"
-        Write-Host "8. Configure User Reported Messages"
+        Write-Host "7. Migrate Email lists to Global Tenant Allow/Block List"
+        Write-Host "8. Configure User Reported Message Submissions"
         Write-Host "A: Configure ALL Policies" -ForegroundColor Yellow
         Write-Host "Q: Back to Main Menu"
         Write-Host
@@ -730,29 +837,29 @@ try {
                 Set-AntiPhishingPolicy
             }
             '4' {
-                Set-AntiSpamPolicy -CusAdminAddress $CusAdminAddress -ExcludedSenders $Config.ExcludedSenders -ExcludedDomains $Config.ExcludedDomains
+                Set-AntiSpamPolicy 
             }
             '5' {
-                Set-SafeAttachmentsPolicy -CusAdminAddress $CusAdminAddress
+                Set-SafeAttachmentsPolicy
             }
             '6' {
                 Set-SafeLinksPolicy -CusAdminAddress $CusAdminAddress
             }
             '7' {
-                Set-TenantAllowBlockList -AllowedSenders $Config.AllowedSenders -AllowedDomains $Config.AllowedDomains -BlockedSenders $Config.BlockedSenders -BlockedDomains $Config.BlockedDomains
+                Set-TenantAllowBlockList
             }
             '8' {
-                Set-UserReportedMessages -CusAdminAddress $CusAdminAddress
+                Set-UserReportedMessages
             }
             'A' {
                 Set-AutoForwardAndJunkConfig -CusAdminAddress $CusAdminAddress -MSPAlertsAddress $Config.MSPAlertsAddress
                 Set-AntiMalwarePolicy -CusAdminAddress $CusAdminAddress
                 Set-AntiPhishingPolicy
-                Set-AntiSpamPolicy -CusAdminAddress $CusAdminAddress -ExcludedSenders $Config.ExcludedSenders -ExcludedDomains $Config.ExcludedDomains
-                Set-SafeAttachmentsPolicy -CusAdminAddress $CusAdminAddress
+                Set-AntiSpamPolicy
+                Set-SafeAttachmentsPolicy
                 Set-SafeLinksPolicy -CusAdminAddress $CusAdminAddress
-                Set-TenantAllowBlockList -AllowedSenders $Config.AllowedSenders -AllowedDomains $Config.AllowedDomains -BlockedSenders $Config.BlockedSenders -BlockedDomains $Config.BlockedDomains
-                Set-UserReportedMessages -CusAdminAddress $CusAdminAddress
+                Set-TenantAllowBlockList
+                Set-UserReportedMessages
                 Write-Log "All configurations completed successfully" "INFO"
             }
             'Q' {

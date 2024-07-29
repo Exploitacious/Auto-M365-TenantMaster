@@ -2,8 +2,6 @@
 
 MSP Focused DLP deployment template for M365 Business Premium clients.
 
-The point of this is to deploy an intelligent implementation of DLP on a customer's environment with a simple powershell script, rather than spending hours clicking through the protection.office.com GUI. There are a few things to consider in this script, but it was designed to be relevant and uninstrusive to a very wide range of USA based customers, especially within the small-medium size sector. If you have clients that are require HIPAA or PCI compliance, this script is still a great place to start.
-
 ## Policies and Rules Deployed
 
 This scripts deploys three policies for the different locations covered by DLP. With each policy, there are specific rule sets which will be associated to the parent policy/location.

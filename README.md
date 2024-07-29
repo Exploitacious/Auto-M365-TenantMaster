@@ -20,13 +20,16 @@ The script uses a `config.json` file for customizable settings. There are two wa
 
 1. (Most Recommended) Run the Launcher.ps1 and it will generate a brand new config file. You can then open this file and modify settings as needed.
 
-2. Copy the following text and customize it for the organization you are setting up. Place the file in the same directory as the Launcher.ps1 file.
+2. Copy the following text and customize it for the organization you are setting up. Name the file `config.json` and place the file in the same directory as the Launcher.ps1 file.
 
 ```json
 {
-  "BreakGlassAccountPass": "StrongPassword",
-  "GlobalAdminUPN": "Admin@example.com",
-  "MSPName": "MSPname (no Spaces or characters)",
+  "MSPName": "MSP Name (no Spaces or characters) e.g.: Umbrella",
+  "MSPAlertsAddress": "alerting@umbrellaitgroup.com",
+  "MSPSupportMail": "Support@Umbrellaitgroup.com",
+  "MSPSupportInfo": "Umbrella IT Group (904) 930-4261",
+  "BreakGlassAccountPass": "Strong-Password",
+  "LogoURL": "Direct URL to a Logo for use with a white background. PNG or JPEG only.",
   "AdminAccessToMailboxes": true,
   "DisableFocusedInbox": true,
   "DisableSecurityDefaults": true,
@@ -42,25 +45,38 @@ The script uses a `config.json` file for customizable settings. There are two wa
   "Timezone": "Eastern Standard Time",
 
   "TeamsConfig": {
+    "DisableAnonymousJoin": true,
+    "AllowDropBox": false,
+    "AllowGoogleDrive": false,
     "AllowOrgWideTeamCreation": false,
-    "AllowPrivateTeamDiscovery": false,
+    "AllowGuestAccess": true,
+    "AllowBox": false,
+    "AllowTeamsConsumerInbound": false,
     "AllowFederatedUsers": true,
     "AllowTeamsConsumer": false,
-    "AllowGuestAccess": true,
-    "DisableAnonymousJoin": true
+    "AllowEmailIntoChannel": true,
+    "AllowEgnyte": false
   },
 
   "SharePointOneDriveConfig": {
     "OneDriveStorageQuota": 1048576,
-    "OneDriveNewUserQuota": 1048576,
     "SharingCapability": "ExternalUserSharingOnly",
     "DefaultSharingLinkType": "Internal",
-    "RootSharePointURL": "https://<customerDomain>.sharepoint.com"
+    "BccExternalSharingInvitations": true,
+    "PreventExternalUsersFromResharing": true
   },
 
   "CompliancePolicies": {
-    "EmailRetentionYears": 7,
-    "SharePointOneDriveRetentionYears": 5
+    "SharePointOneDriveRetentionYears": 10,
+    "EmailRetentionYears": 10
+  },
+
+  "ScriptPaths": {
+    "ModuleUpdater": "M365ModuleUpdater\\M365ModuleUpdater.ps1",
+    "TenantExchangeConfig": "TenantExchangeConfig\\TenantExchangeConfig.ps1",
+    "ModuleConnector": "M365ModuleConnector\\M365ModuleConnector.ps1",
+    "DLPConfig": "DataLossPrevention\\DLPConfig.ps1",
+    "ATPConfig": "AdvancedThreatProtection\\ATPConfig.ps1"
   }
 }
 ```
