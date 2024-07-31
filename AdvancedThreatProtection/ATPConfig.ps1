@@ -710,7 +710,7 @@ function Set-UserReportedMessages {
             PreSubmitMessageEnabled          = $true
             PostSubmitMessageEnabled         = $true
             PostSubmitMessage                = "Thank you for reporting the suspicious email. Your email has successfully been submitted for review."
-            PreSubmitMessage                 = "This email will be submitted to $Config.MSPName and Microsoft for analysis. This email will be removed from your mailbox and $Config.MSPName will reach out to you if further action is required.`n $($Config.MSPSupportInfo)"
+            PreSubmitMessage                 = " This email will be submitted to $($Config.MSPName) and Microsoft for analysis. It will be removed from your mailbox and $($Config.MSPName) will reach out to you if any further action is required. `n $($Config.MSPSupportInfo)"
             PreSubmitMessageTitle            = "Report Suspicious Email"
             PostSubmitMessageTitle           = "Thank you for being pro-active!"
             ReportJunkAddresses              = $($Global:Credential.UserName)
@@ -720,10 +720,8 @@ function Set-UserReportedMessages {
     
         # Report Submission Rule Parameters
         $reportRuleParams = @{
-            Identity               = "DefaultReportSubmissionRule"
+            Name                   = "DefaultReportSubmissionRule"
             ReportSubmissionPolicy = "DefaultReportSubmissionPolicy"
-            State                  = "Enabled"
-            Priority               = 0
             SentTo                 = $($Global:Credential.UserName)
         }
     
@@ -755,13 +753,9 @@ function Set-UserReportedMessages {
             # Create New Rule
             Write-Log "Starting Default Report Submission Rule Configuration" "INFO"
             
-            Set-ReportSubmissionRule @reportRuleParams
+            New-ReportSubmissionRule @reportRuleParams
             Write-Log "Default Report Submission Rule configuration completed" "INFO"
         }
-    
-        # Display the updated settings to verify
-        Get-ReportSubmissionPolicy -Identity DefaultReportSubmissionPolicy | Format-List
-        Get-ReportSubmissionRule -Identity DefaultReportSubmissionRule | Format-List
     }
     catch {
         Write-Log "An error occurred during the configuration: $_" "ERROR"
